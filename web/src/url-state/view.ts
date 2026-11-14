@@ -61,7 +61,7 @@ const DEFAULTS: View = {
   fovH: 0.1,
   fovLinked: true,
   mode: "slider",
-  dr: "qr3",
+  dr: "dr1",
   pins: [{ center: 42, width: 5 }],
   gaia: null,
   wise: null,

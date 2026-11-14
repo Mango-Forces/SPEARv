@@ -11,7 +11,7 @@ const BASE: View = {
   fovH: 1,
   fovLinked: true,
   mode: "composite",
-  dr: "qr3",
+  dr: "dr1",
   pins: [{ center: 42, width: 5 }],
   gaia: null,
   wise: null,
