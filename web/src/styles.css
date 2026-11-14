@@ -809,41 +809,16 @@ figcaption .delta-legend {
 
 
 
-/* Extras drawer: Spectrum / Layers switcher at the top. */
-.extras-switch {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin: 0 0 14px;
-  padding: 6px 8px;
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  background: var(--sunken);
+/* Extras drawer stacks layers and spectrum in one scrollable panel. */
+.extras-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 
-.extras-switch__label {
-  min-width: 5.5rem;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-align: center;
-}
-
-.extras-switch__arrow {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border-radius: 4px;
-  color: var(--text-2);
-  font-size: 18px;
-  line-height: 1;
-}
-
-.extras-switch__arrow:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--line-hover);
+.extras-section + .extras-section {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 /* One compact geometry pair; the chain changes draft editing, not the image. */

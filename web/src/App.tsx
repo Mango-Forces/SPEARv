@@ -32,7 +32,6 @@ import {
 } from "./url-state/view"
 
 type VisitRow = { index: number; mjd: number; mjd_end: number; exposures: number }
-type DataDrawer = "layers" | "spectrum"
 const EXTRAS_TONGUE_OFFSET = 88
 type RawControlsState = {
   state: RawSessionState
@@ -107,7 +106,6 @@ function ValidViewApp({ view }: { view: View }) {
   const [visits, setVisits] = useState<VisitRow[]>([])
   const [exposures, setExposures] = useState<number>()
   const [controlsOpen, setControlsOpen] = useState(initialSidebarOpen)
-  const [dataDrawer, setDataDrawer] = useState<DataDrawer>("spectrum")
   const [dataOpen, setDataOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [topRightDrawer, setTopRightDrawer] = useState<"extras" | "share">("extras")
@@ -126,7 +124,6 @@ function ValidViewApp({ view }: { view: View }) {
   const controlsTabRef = useRef<HTMLButtonElement>(null)
   const extrasTabRef = useRef<HTMLButtonElement>(null)
   const shareTabRef = useRef<HTMLButtonElement>(null)
-  const spectrumAutoOpened = useRef(false)
   const focusAfterCommit = useRef<"controls" | "data" | "share" | null>(null)
   const requestedWorkspace = workspaceOf(view)
   const workspace = requestedWorkspace === "specific" ? "composite" : requestedWorkspace
@@ -292,26 +289,15 @@ function ValidViewApp({ view }: { view: View }) {
     )
   }, [])
 
-  const openExtras = (name: DataDrawer, source: "tongue" | "pick" | "switch" = "tongue") => {
+  const openExtras = (source: "tongue" | "pick" = "tongue") => {
     if (source === "tongue" && dataOpen) {
       setDataOpen(false)
       return
     }
-    if (source === "pick" && !spectrumAutoOpened.current) spectrumAutoOpened.current = true
     focusAfterCommit.current = source === "tongue" ? "data" : null
-    setDataDrawer(name)
     setTopRightDrawer("extras")
     setShareOpen(false)
     setDataOpen(true)
-  }
-
-  const cycleExtrasPanel = (dir: -1 | 1) => {
-    const order: DataDrawer[] = ["spectrum", "layers"]
-    const next = order[(order.indexOf(dataDrawer) + dir + order.length) % order.length]
-    setDataDrawer(next)
-    setTopRightDrawer("extras")
-    setShareOpen(false)
-    if (!dataOpen) setDataOpen(true)
   }
 
   useEffect(() => {
@@ -321,7 +307,7 @@ function ValidViewApp({ view }: { view: View }) {
     if (target === "controls") controlsTabRef.current?.focus()
     if (target === "data") extrasTabRef.current?.focus()
     if (target === "share") shareTabRef.current?.focus()
-  }, [controlsOpen, dataDrawer, dataOpen, shareOpen, workspace])
+  }, [controlsOpen, dataOpen, shareOpen, workspace])
 
   // One App-owned handler closes one layer at a time.
   useEffect(() => {
@@ -632,7 +618,7 @@ function ValidViewApp({ view }: { view: View }) {
           rawEnabled={rawEnabled}
           onRawState={onRawState}
           onCatalogStatus={onCatalogStatus}
-          onOpenSpectrum={() => openExtras("spectrum", "pick")}
+          onOpenSpectrum={() => openExtras("pick")}
         />
         <EdgeSidebar
           id="drawer-extras"
@@ -657,88 +643,66 @@ function ValidViewApp({ view }: { view: View }) {
           className={`edge-sidebar--data${topRightDrawer === "extras" ? " edge-sidebar--front" : ""}`}
         >
           <div className="drawer-body">
-            <div className="extras-switch" role="tablist" aria-label="Extras panel">
-              <button
-                type="button"
-                className="extras-switch__arrow"
-                aria-label="Previous extras panel"
-                onClick={() => cycleExtrasPanel(-1)}
-              >
-                ‹
-              </button>
-              <span className="extras-switch__label" role="tab" aria-selected="true">
-                {dataDrawer === "spectrum" ? "Spectrum" : "Layers"}
-              </span>
-              <button
-                type="button"
-                className="extras-switch__arrow"
-                aria-label="Next extras panel"
-                onClick={() => cycleExtrasPanel(1)}
-              >
-                ›
-              </button>
-            </div>
-            {dataDrawer === "layers" ? (
-              <>
-                <h2 className="drawer-title">Catalog layers</h2>
-                <div className="layer-row">
-                  <span className="layer-key gaia" aria-hidden="true" />
-                  <span className="layer-name">Gaia</span>
-                  <button
-                    type="button"
-                    aria-pressed={view.gaia !== null}
-                    onClick={() => commit({ ...view, gaia: view.gaia === null ? TOGGLE_ON_OPACITY : null })}
-                  >
-                    {view.gaia === null ? "Show" : "Hide"}
-                  </button>
+            <section className="extras-section" aria-label="Catalog layers">
+              <h2 className="drawer-title">Catalog layers</h2>
+              <div className="layer-row">
+                <span className="layer-key gaia" aria-hidden="true" />
+                <span className="layer-name">Gaia</span>
+                <button
+                  type="button"
+                  aria-pressed={view.gaia !== null}
+                  onClick={() => commit({ ...view, gaia: view.gaia === null ? TOGGLE_ON_OPACITY : null })}
+                >
+                  {view.gaia === null ? "Show" : "Hide"}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  aria-label="Gaia opacity"
+                  disabled={view.gaia === null}
+                  value={view.gaia ?? TOGGLE_ON_OPACITY}
+                  onChange={(event) => commit({ ...view, gaia: Number(event.target.value) }, "replace")}
+                />
+                <LayerStatus source="gaia" view={view} state={catalogStatus.gaia} supported={catalogSupported} />
+              </div>
+              <div className="layer-row">
+                <span className="layer-key wise" aria-hidden="true" />
+                <span className="layer-name">WISE</span>
+                <button
+                  type="button"
+                  aria-pressed={view.wise !== null}
+                  onClick={() => commit({ ...view, wise: view.wise === null ? TOGGLE_ON_OPACITY : null })}
+                >
+                  {view.wise === null ? "Show" : "Hide"}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  aria-label="WISE opacity"
+                  disabled={view.wise === null}
+                  value={view.wise ?? TOGGLE_ON_OPACITY}
+                  onChange={(event) => commit({ ...view, wise: Number(event.target.value) }, "replace")}
+                />
+                <LayerStatus source="wise" view={view} state={catalogStatus.wise} supported={catalogSupported} />
+              </div>
+              {view.mode === "delta" ? (
+                <label className="layer-check">
                   <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    aria-label="Gaia opacity"
-                    disabled={view.gaia === null}
-                    value={view.gaia ?? TOGGLE_ON_OPACITY}
-                    onChange={(event) => commit({ ...view, gaia: Number(event.target.value) }, "replace")}
+                    type="checkbox"
+                    checked={view.candidates}
+                    onChange={(event) => commit({ ...view, candidates: event.target.checked })}
                   />
-                  <LayerStatus source="gaia" view={view} state={catalogStatus.gaia} supported={catalogSupported} />
-                </div>
-                <div className="layer-row">
-                  <span className="layer-key wise" aria-hidden="true" />
-                  <span className="layer-name">WISE</span>
-                  <button
-                    type="button"
-                    aria-pressed={view.wise !== null}
-                    onClick={() => commit({ ...view, wise: view.wise === null ? TOGGLE_ON_OPACITY : null })}
-                  >
-                    {view.wise === null ? "Show" : "Hide"}
-                  </button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    aria-label="WISE opacity"
-                    disabled={view.wise === null}
-                    value={view.wise ?? TOGGLE_ON_OPACITY}
-                    onChange={(event) => commit({ ...view, wise: Number(event.target.value) }, "replace")}
-                  />
-                  <LayerStatus source="wise" view={view} state={catalogStatus.wise} supported={catalogSupported} />
-                </div>
-                {view.mode === "delta" ? (
-                  <label className="layer-check">
-                    <input
-                      type="checkbox"
-                      checked={view.candidates}
-                      onChange={(event) => commit({ ...view, candidates: event.target.checked })}
-                    />
-                    Candidate labels
-                  </label>
-                ) : null}
-              </>
-            ) : (
+                  Candidate labels
+                </label>
+              ) : null}
+            </section>
+            <section className="extras-section" aria-label="Spectrum">
               <SidebarSpectrum ra={view.ra} dec={view.dec} release={view.dr} point={point} fovL={view.fovL} fovH={view.fovH} />
-            )}
+            </section>
           </div>
         </EdgeSidebar>
         <EdgeSidebar
