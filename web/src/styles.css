@@ -17,11 +17,11 @@
   --text: #e8eaec;
   --text-2: #a7adb3;
   --text-3: #7d848b;
-  /* NASA identity palette on trial: blue primary, red for Stop. */
-  --accent: #0032a0;
-  --accent-ink: #ffffff;
-  --accent-red: #e4002b;
-  --danger: #e4002b;
+  --accent: #c6ff2e;
+  --accent-ink: #0a0c03;
+  /* Interrupt control only; not the shell accent. */
+  --stop: #e85a4f;
+  --danger: #e39a8f;
   --warn: #d9b779;
   --sans: "Google Sans", "Product Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -251,25 +251,33 @@ summary:focus-visible {
 }
 
 .topbar .show {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.25rem;
+  min-width: 5.25rem;
   height: 34px;
-  padding: 0 18px;
+  padding: 0;
   border-radius: 4px;
   font-weight: 700;
   font-size: 14px;
+  line-height: 1;
+  text-align: center;
 }
 
 .topbar .show:hover:not(:disabled),
 .location .fov-chain[aria-pressed="true"]:hover:not(:disabled) {
-  border-color: #1a4fd4;
-  background: #1a4fd4;
+  border-color: #d4ff5c;
+  background: #d4ff5c;
   color: var(--accent-ink);
 }
 
-/* Stop is its own action, not a hover state of Find. NASA red while running. */
+/* Stop keeps the same box as Find; only the fill changes. */
 .topbar .show--stop,
 .topbar .show--stop:hover:not(:disabled) {
-  border-color: var(--accent-red);
-  background: var(--accent-red);
+  border-color: var(--stop);
+  background: var(--stop);
   color: #ffffff;
 }
 
@@ -723,8 +731,9 @@ figcaption .delta-legend {
 
 
   .topbar .show {
+    width: 5rem;
+    min-width: 5rem;
     height: 32px;
-    padding: 0 14px;
   }
 }
 
