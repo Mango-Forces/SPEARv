@@ -9,6 +9,7 @@ use axum::routing::get;
 use axum::Json;
 use serde_json::{json, Value};
 use spearv_core::{env, Cache, Context, Extension, IndexService, WorkBudget};
+use spearv_index::client::IndexClient;
 use utoipa::openapi::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 
@@ -29,9 +30,7 @@ async fn main() {
             }
         }
         Ok(Command::Serve) => {
-            let ctx = Arc::new(
-                Context::new(Arc::new(Cache::new())).with_budget(Arc::new(WorkBudget::from_env())),
-            );
+            let ctx = context();
             let port = env::number("SPEARV_PORT", 8080_u16);
             // Loopback by default. A container needs 0.0.0.0, or the port is unreachable.
             let host = std::env::var("SPEARV_HOST").unwrap_or_else(|_| "127.0.0.1".into());
@@ -47,6 +46,21 @@ async fn main() {
             std::process::exit(2);
         }
     }
+}
+
+/// The served context: the process budget and the index-service at `index_url()`.
+fn context() -> Arc<Context> {
+    let index = Arc::new(IndexClient::new(index_url()).expect("index-service client"));
+    Arc::new(
+        Context::new(Arc::new(Cache::new()))
+            .with_budget(Arc::new(WorkBudget::from_env()))
+            .with_index(index),
+    )
+}
+
+/// Where the index-service answers, from `SPEARV_INDEX_URL`.
+fn index_url() -> String {
+    std::env::var("SPEARV_INDEX_URL").unwrap_or_else(|_| "http://127.0.0.1:8788".into())
 }
 
 #[derive(Debug, PartialEq)]
@@ -351,6 +365,11 @@ mod tests {
         assert_eq!(parse(args(&["--openapi"])), Ok(Command::OpenApi(None)));
         assert_eq!(parse(args(&["--openapi", "spec.json"])), Ok(Command::OpenApi(Some("spec.json".into()))));
         assert!(parse(args(&["--serve"])).unwrap_err().contains("--openapi"));
+    }
+
+    #[test]
+    fn the_served_context_installs_the_index_client() {
+        assert!(super::context().index().is_some());
     }
 
     #[test]

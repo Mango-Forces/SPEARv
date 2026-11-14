@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "binder"]
+members = ["core", "index", "index-service", "binder"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,7 @@ publish = false
 
 [workspace.dependencies]
 spearv-core = { path = "core" }
+spearv-index = { path = "index" }
 async-trait = "0.1"
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -18,3 +19,6 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net", "time", "io-util"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-axum = "0.2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+futures = "0.3"

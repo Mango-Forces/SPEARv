@@ -1,0 +1,26 @@
+[package]
+name = "spearv-index-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "index_service"
+path = "src/lib.rs"
+
+[[bin]]
+name = "index-service"
+path = "src/main.rs"
+
+[dependencies]
+spearv-core.workspace = true
+spearv-index = { workspace = true, features = ["store"] }
+async-trait.workspace = true
+axum.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+spearv-index = { workspace = true, features = ["store", "client"] }
