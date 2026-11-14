@@ -13,10 +13,10 @@ Environment=SPEARV_WISE_CACHE=%h/.cache/spearv/wise
 Environment=SPEARV_DISPLAY_DIR=%h/.cache/spearv/display
 Environment=SPEARV_MOSAIC_READS=32
 Environment=SPEARV_WORK_BUDGET_MIB=20480
+Environment=SPEARV_PYTHON_WORKERS=8
 Environment=SPEARV_PYTHON_PREFIX=/home/ubuntu/mango-spearv/.build/runtime/install/opt/spearv/python
 Environment=SPEARV_CFITSIO_PREFIX=/home/ubuntu/mango-spearv/.build/native/cfitsio-4.7.0-prefix
 Environment=OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-# Private runtime libs (libpython) if not rpath-linked
 Environment=LD_LIBRARY_PATH=/home/ubuntu/mango-spearv/.build/runtime/install/opt/spearv/python/lib
 ExecStart=%h/mango-spearv/spine/target/release/spearv
 Restart=on-failure
