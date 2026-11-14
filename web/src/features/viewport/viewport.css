@@ -1,0 +1,89 @@
+.image-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  overflow: clip;
+  background: var(--sunken, #030404);
+  isolation: isolate;
+  outline: none;
+}
+
+.image-viewport:focus-visible {
+  outline: 2px solid var(--accent, #c6ff2e);
+  outline-offset: -2px;
+}
+
+.image-viewport-picture {
+  position: absolute;
+  top: 0;
+  left: 0;
+  flex: none;
+  transform-origin: 0 0;
+  cursor: crosshair;
+}
+
+.image-viewport-picture * {
+  cursor: crosshair !important;
+}
+
+.image-viewport[data-dragging="true"] .image-viewport-picture,
+.image-viewport[data-dragging="true"] .image-viewport-picture * {
+  cursor: grabbing !important;
+}
+
+.image-viewport-hud {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.image-viewport-hud > * {
+  pointer-events: none;
+}
+
+.image-viewport-hud button {
+  pointer-events: auto;
+}
+
+.image-viewport-controls {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  background: color-mix(in srgb, var(--panel-2, #0e1011) 94%, transparent);
+  border: 1px solid var(--line-strong, #2c3136);
+  border-radius: 4px;
+  color: var(--text-secondary, #a7adb3);
+  font: 0.72rem/1.2 ui-sans-serif, system-ui, sans-serif;
+  pointer-events: auto;
+}
+
+.image-viewport-controls button {
+  min-width: 1.7rem;
+  min-height: 1.7rem;
+  padding: 0 0.35rem;
+  border: 1px solid var(--line, #1c2023);
+  border-radius: 4px;
+  background: var(--raised, #141719);
+  color: var(--text, #e8eaec);
+  font: inherit;
+  cursor: pointer;
+}
+
+.image-viewport-controls button:hover {
+  border-color: var(--accent, #c6ff2e);
+  color: var(--accent, #c6ff2e);
+}
+
+.image-viewport-controls span {
+  min-width: 3.1rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}

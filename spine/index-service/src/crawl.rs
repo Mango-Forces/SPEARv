@@ -299,10 +299,11 @@ impl Crawler {
                 let (bucket, headers) = (Arc::clone(&self.bucket), Arc::clone(&self.headers));
                 async move {
                     let _permit = headers.acquire_owned().await;
-                    let row = bucket
-                        .read_prefix(&object.key, HEADER_BYTES)
-                        .await
-                        .and_then(|bytes| row_from_header(&object, &bytes));
+                    let row = async {
+                        let bytes = bucket.read_prefix(&object.key, HEADER_BYTES).await?;
+                        row_from_header(&object, &bytes).await
+                    }
+                    .await;
                     (row, replaces)
                 }
             })
@@ -583,7 +584,7 @@ mod tests {
             .collect()
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_empty_index_gets_a_full_crawl_and_a_rerun_reads_nothing() {
         let f = fixture();
         let first = f.crawler.crawl().await;
@@ -611,7 +612,7 @@ mod tests {
         assert_eq!(f.store.generation().unwrap(), generation, "nothing changed, so the generation stays");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn new_keys_are_added_and_a_changed_etag_is_read_again() {
         let f = fixture();
         f.crawler.crawl().await;
@@ -627,7 +628,7 @@ mod tests {
         assert!(f.store.coverage(&CoverageQuery::view(56.8, 24.0, 0.1)).unwrap().iter().all(|r| r.key != moved));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn each_missing_row_is_decided_by_its_own_head() {
         let f = fixture();
         f.crawler.crawl().await;
@@ -656,7 +657,7 @@ mod tests {
         assert!(!keys(&f.store).contains(&unsure));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn rows_under_a_failed_listing_are_not_candidates() {
         let f = fixture();
         f.crawler.crawl().await;
@@ -695,7 +696,7 @@ mod tests {
         assert_eq!(keys(&f.store).len(), before.len() - 2);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_folder_that_vanished_from_a_complete_listing_is_checked_row_by_row() {
         let f = fixture();
         f.crawler.crawl().await;
@@ -712,7 +713,7 @@ mod tests {
         assert!(f.store.releases().unwrap().iter().all(|r| r.release != "qr2" || r.exposures == 0));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_header_that_cannot_be_read_is_retried_next_crawl() {
         let f = fixture();
         let broken = key("qr2", "2025W34_2B", V2, 2, 2);

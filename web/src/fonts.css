@@ -1,0 +1,14 @@
+/* SPEARv typeface: Google Sans variable, served locally from /public/fonts.
+ * No remote third-party font dependency. The shell owns the global
+ * --sans / --font-sans tokens and sets them to 'Google Sans', sans-serif;
+ * this file only provides the @font-face those tokens resolve to. */
+
+@font-face {
+  font-family: "Google Sans";
+  src:
+    url("/fonts/GoogleSans-variable.woff2") format("woff2") tech("variations"),
+    url("/fonts/GoogleSans-variable.ttf") format("truetype-variations");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}

@@ -1,0 +1,94 @@
+/* One canvas in grid pixels, scaled by CSS as the PNG was. The canvas is
+ * filled black when the job starts; that black is "not read yet", while a
+ * pixel the server has read and found no sample in is the NODATA grey-blue
+ * (#181c24) the tiles carry. Keep those two apart.
+ *
+ * Chrome colours read the shell's tokens, with the SPEARv palette as fallbacks. */
+
+.mosaic {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--sunken, #030404);
+}
+
+.mosaic.pickable { cursor: crosshair; }
+
+/* The picture is the sampling control while its grid is one the server can
+ * click. Keep the ring inside the frame so the viewer's clipped row cannot cut
+ * it off. */
+.mosaic.pickable:focus-visible {
+  outline: 2px solid var(--accent, #c6ff2e);
+  outline-offset: -2px;
+}
+
+.mosaic-canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.mosaic-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.mosaic-grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  fill: none;
+}
+
+.mosaic-lines {
+  stroke: var(--text, #e8eaec);
+  stroke-opacity: 0.08;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.mosaic-box {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mosaic-box { animation: mosaic-pulse 1.6s ease-in-out infinite; }
+}
+
+@keyframes mosaic-pulse {
+  50% { stroke-opacity: 0.45; }
+}
+
+
+.mosaic-canvas--replaced { visibility: hidden; }
+
+.mosaic-server-image {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+}
+
+.mosaic-server-image--pending { opacity: 0; }
+
+.mosaic-preview-label {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 2;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--line-strong, #394047);
+  border-radius: 3px;
+  background: var(--panel-2, #0e1011);
+  color: var(--text-secondary, #a7adb3);
+  font: 0.7rem/1.3 var(--sans, "Google Sans", sans-serif);
+  pointer-events: none;
+}

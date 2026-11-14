@@ -1,0 +1,256 @@
+.raw-display {
+  --raw-gap: 8px;
+  --raw-radius: 4px;
+  --raw-line: var(--line-strong, #394047);
+  color: var(--text, #e8eaec);
+  font-family: var(--sans, "Google Sans", sans-serif);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  min-width: 0;
+}
+
+.raw-display h3,
+.raw-display h4 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.raw-display fieldset,
+fieldset.raw-display {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.raw-display fieldset > legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.raw-display fieldset:disabled,
+fieldset.raw-display:disabled {
+  opacity: 0.6;
+}
+
+.raw-display input,
+.raw-display select,
+.raw-display button {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--raw-line);
+  border-radius: var(--raw-radius);
+  background: var(--sunken, #030404);
+  padding: 5px 8px;
+}
+
+.raw-display input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+.raw-display select {
+  width: 100%;
+}
+
+.raw-display input[type="color"] {
+  width: 36px;
+  height: 28px;
+  padding: 2px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.raw-display input[type="range"] {
+  padding: 0;
+  accent-color: var(--accent, #c6ff2e);
+}
+
+.raw-display input[type="checkbox"],
+.raw-display input[type="radio"] {
+  accent-color: var(--accent, #c6ff2e);
+}
+
+.raw-display button {
+  cursor: pointer;
+  background: var(--panel, #111416);
+}
+
+.raw-display button:hover:not(:disabled) {
+  border-color: var(--accent, #c6ff2e);
+}
+
+.raw-display :is(input, select, button):focus-visible {
+  outline: 2px solid var(--accent, #c6ff2e);
+  outline-offset: 2px;
+}
+
+.raw-display label {
+  min-width: 0;
+}
+
+.raw-check {
+  display: flex;
+  align-items: center;
+  gap: var(--raw-gap);
+  margin: 6px 0;
+}
+
+.raw-layer {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--raw-line);
+  margin-bottom: 8px;
+}
+
+.raw-layer-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.raw-layer-title {
+  margin: 0;
+}
+
+.raw-layer-toggle {
+  display: grid;
+  place-items: center;
+  margin: 0;
+  cursor: pointer;
+}
+
+.raw-layer-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent, #c6ff2e);
+}
+
+.raw-layer-reset {
+  justify-self: end;
+  white-space: nowrap;
+  padding: 4px 10px;
+}
+
+.raw-layer--off .raw-layer-title,
+.raw-layer--off .raw-tint,
+.raw-layer--off .raw-layer-body,
+.raw-layer--off .raw-note {
+  opacity: 0.38;
+}
+
+.raw-layer--off .raw-layer-body {
+  pointer-events: none;
+}
+
+.raw-gain {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 52px;
+  gap: var(--raw-gap);
+  align-items: center;
+  margin: 0 0 10px;
+}
+
+.raw-gain > label {
+  color: var(--text-2, #a7adb3);
+  font-size: 0.75rem;
+}
+
+.raw-points,
+.raw-stretch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--raw-gap);
+  margin: 0 0 10px;
+}
+
+.raw-points label,
+.raw-stretch label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-2, #a7adb3);
+  font-size: 0.75rem;
+}
+
+.raw-tone {
+  margin: 4px 0 0;
+}
+
+.raw-tint {
+  display: flex;
+  align-items: center;
+  gap: var(--raw-gap);
+  margin: 0 0 8px;
+}
+
+.raw-tint > input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.raw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--raw-gap);
+  margin: 0 0 10px;
+}
+
+.raw-actions span {
+  color: var(--text-2, #a7adb3);
+  font-size: 0.75rem;
+}
+
+.raw-note,
+.raw-load p {
+  color: var(--text-2, #a7adb3);
+  margin: 4px 0 8px;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.raw-error {
+  color: var(--danger, #ff9494);
+  margin: 6px 0;
+  font-size: 0.75rem;
+}
+
+.raw-band-expression {
+  display: grid;
+  gap: 4px;
+  color: var(--text-2, #a7adb3);
+  font-size: 0.75rem;
+  white-space: normal;
+}
+
+.raw-band-expression input {
+  display: block;
+  margin: 0;
+  color: var(--text, #e8eaec);
+  font-size: 0.8125rem;
+}
+
+.raw-range .raw-actions {
+  margin-top: 10px;
+}
+
+.raw-load {
+  margin-bottom: 8px;
+}
+
+.raw-load button {
+  margin: 4px 0 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .raw-display * {
+    transition: none;
+  }
+}

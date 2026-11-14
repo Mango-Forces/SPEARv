@@ -1,0 +1,270 @@
+[
+  {
+    "package": "numpy",
+    "version": "2.5.4",
+    "archive_sha256": "4054173604cd8658796053f1f3bc0befb68ec1c0762c57fdad61e199256a8617",
+    "notices": [
+      {
+        "path": "numpy/_core/include/numpy/random/LICENSE.txt",
+        "bytes": 1018,
+        "sha256": "fbc539f47d0cf83bc61378080fb873d5c14630126cacbfe754035c3926daa5ec"
+      },
+      {
+        "path": "numpy/ma/LICENSE",
+        "bytes": 1593,
+        "sha256": "05f3b88351988ecfad10abe92c0c50e5875c6452d5009a0084cc291551ffcca6"
+      },
+      {
+        "path": "numpy/random/LICENSE.md",
+        "bytes": 3511,
+        "sha256": "103166b62b80443afb9eb3488e052ea06be0cff566b908f199e561fde49af19f"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/LICENSE.txt",
+        "bytes": 46794,
+        "sha256": "4860083caa0de2ac3292ca98bd074bd8f45d8b32624e37b1e70a240bff61e488"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/_core/include/numpy/libdivide/LICENSE.txt",
+        "bytes": 1018,
+        "sha256": "fbc539f47d0cf83bc61378080fb873d5c14630126cacbfe754035c3926daa5ec"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/_core/src/common/pythoncapi-compat/COPYING",
+        "bytes": 690,
+        "sha256": "3f2c1ffa76383a55ae0aac01c9737cd70050dff63e1f026694fbe9d662573c98"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/_core/src/highway/LICENSE",
+        "bytes": 20785,
+        "sha256": "e340270d4f64384569a91d546acb5b094d69ce47f0c015db77abb74dc6f815af"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/_core/src/multiarray/dragon4_LICENSE.txt",
+        "bytes": 1414,
+        "sha256": "f7b14309e5f54e5022b26448eefd419988ada2aec01d3c1162d84a0ea8f21f2c"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md",
+        "bytes": 1514,
+        "sha256": "211e7d737d6179a08f791ebb0a99897ce7cd2457410c542876d125576edfe910"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/_core/src/umath/svml/LICENSE",
+        "bytes": 1543,
+        "sha256": "c17011467b4fe6e20fbfbeda4df09e58c2bca5480a063e55735a4000a379aad9"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/fft/pocketfft/LICENSE.md",
+        "bytes": 1498,
+        "sha256": "a85ca13fdf90160b64a0698215868c13b74d835ad0a4e2ba44713b8c5058a056"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/linalg/lapack_lite/LICENSE.txt",
+        "bytes": 2266,
+        "sha256": "a14cc25e10d40a3aa705b7de2fb764a6535d8ee9b2db4e1724900585457dfd55"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/ma/LICENSE",
+        "bytes": 1593,
+        "sha256": "05f3b88351988ecfad10abe92c0c50e5875c6452d5009a0084cc291551ffcca6"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/random/LICENSE.md",
+        "bytes": 3511,
+        "sha256": "103166b62b80443afb9eb3488e052ea06be0cff566b908f199e561fde49af19f"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/random/src/distributions/LICENSE.md",
+        "bytes": 2745,
+        "sha256": "469778be8f33d54e1bcaab28c281cc472916d2d273f835e55bc487d30503face"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/random/src/mt19937/LICENSE.md",
+        "bytes": 2926,
+        "sha256": "0e111337b25494a773106695f0e799f642b8567aaacca4f116a74a8177179156"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/random/src/pcg64/LICENSE.md",
+        "bytes": 1154,
+        "sha256": "e7d4f4fb20358f314210a892ae17351e04993813646f697ec387385ca2a36918"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/random/src/philox/LICENSE.md",
+        "bytes": 1509,
+        "sha256": "6f5828a57223d4cc7f8ea505a2623e7b978b242752c1515e355f46ba2cec1800"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/random/src/sfc64/LICENSE.md",
+        "bytes": 1226,
+        "sha256": "9d4098846018319cd68e228ee6220361787f73bccbf00237a85e4fc9621b998f"
+      },
+      {
+        "path": "numpy-2.5.4.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.md",
+        "bytes": 332,
+        "sha256": "268b0ca06759d31ea3ca68dd35f20e877916e927b1c2a835e4592a3c4354b1f9"
+      }
+    ]
+  },
+  {
+    "package": "astropy",
+    "version": "8.0.2",
+    "archive_sha256": "d0e63e0011cc984426c478da8601fe177975fe4cb0b2a059ee88d26d60a0890f",
+    "notices": [
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/LICENSE.rst",
+        "bytes": 1496,
+        "sha256": "97d28d33c40cadc630cddfca53969fdd9dc44ede20faa2d892ba730933e9a20e"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/AURA_LICENSE.rst",
+        "bytes": 1464,
+        "sha256": "eb4a8c8791f6caab1cf36df26db2b6f4e2ddda52657b060ff7f02abc63910aef"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/CONFIGOBJ_LICENSE.rst",
+        "bytes": 1563,
+        "sha256": "89981666c14286fb00ea46d74af52594f7f60c0ca18538114ccccc9332ede313"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/DATATABLES_LICENSE.rst",
+        "bytes": 1421,
+        "sha256": "443854d1ba3c0a57d1a6160f57544eff8356e0a38d9d643e836d7255a40bbeeb"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/ERFA.rst",
+        "bytes": 2647,
+        "sha256": "9a44954a4a4fdd22ec49c192e267aaa5859b6091aa797ee67dd4e5f8dfac1633"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/EXPAT_LICENSE.rst",
+        "bytes": 1208,
+        "sha256": "f6eeb2310d0b00e5cecac39c73a0696a5bdbfb754b26325ed5a502fc1a6c338c"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/GATSPY_LICENSE.rst",
+        "bytes": 1297,
+        "sha256": "d35e9fe2a82cc517eb3277cc697723f251fdbef8dabd33fddfa9210cd01df55c"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/JQUERY_LICENSE.rst",
+        "bytes": 1099,
+        "sha256": "44254c9a91a4647b9192584f17b2d27bf43696ba1ea16b0e88ac7bd6bf0780f1"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/NUMPY_LICENSE.rst",
+        "bytes": 1543,
+        "sha256": "5a91226ddfd61461d8dd6bca70ce98e1037af9db5ffa1f8357bcf71f28eb727f"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/PLY_LICENSE.rst",
+        "bytes": 1539,
+        "sha256": "70783ee4a64cd080f2cc5701c4c34f53e237f0b3771e30c141e2b589ae6aa312"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/POSITIONAL_DEFAULTS.rst",
+        "bytes": 1071,
+        "sha256": "8c15cd91f57bdd5773f61017dfca3ad9693d66558bb18e08c119d59ecdf1e592"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/PYFITS.rst",
+        "bytes": 1470,
+        "sha256": "450b25e541cab7ee433b3df3d4f2360a3dca55c76e644e1ec324d1df67efc47f"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/PYTHON.rst",
+        "bytes": 12763,
+        "sha256": "b9a6d9320b8f2693e8d41e496ce56caadacaddcca9be2a64a61749278f425cf2"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/README.rst",
+        "bytes": 239,
+        "sha256": "3e7d41b084e0d734dd38a0117bc746791c4b5d9ef8e7968e74971fa689ce0f7b"
+      },
+      {
+        "path": "astropy-8.0.2.dist-info/licenses/licenses/WCSLIB_LICENSE.rst",
+        "bytes": 7637,
+        "sha256": "9ccf26cfe845e0eb8bb58053e47366e7ab6b697ae010f7650978d4b71b7d1fc1"
+      }
+    ]
+  },
+  {
+    "package": "pyerfa",
+    "version": "2.0.1.5",
+    "archive_sha256": "b0603e8e1b839327d586c8a627cdc634b795e18b007d84f0cda5500a0908254e",
+    "notices": [
+      {
+        "path": "pyerfa-2.0.1.5.dist-info/LICENSE.rst",
+        "bytes": 1494,
+        "sha256": "0d404371a5d7d1478307ab142962091ec258b92a71f8cab3736fdb46b03cc716"
+      }
+    ]
+  },
+  {
+    "package": "PyYAML",
+    "version": "6.0.3",
+    "archive_sha256": "501a031947e3a9025ed4405a168e6ef5ae3126c59f90ce0cd6f2bfc477be31b7",
+    "notices": [
+      {
+        "path": "pyyaml-6.0.3.dist-info/licenses/LICENSE",
+        "bytes": 1101,
+        "sha256": "8d3928f9dc4490fd635707cb88eb26bd764102a7282954307d3e5167a577e8a4"
+      }
+    ]
+  },
+  {
+    "package": "packaging",
+    "version": "26.3",
+    "archive_sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+    "notices": [
+      {
+        "path": "packaging/licenses/__init__.py",
+        "bytes": 7859,
+        "sha256": "590d12eee73ddbec53b4e9ee5bfc64d9cb3aacb4940e8ebcba260757ce56740b"
+      },
+      {
+        "path": "packaging/licenses/_spdx.py",
+        "bytes": 51122,
+        "sha256": "596ec35e2ca0ebcba9fd8343ff0a51625af548786257815f24b41f7e08613314"
+      },
+      {
+        "path": "packaging-26.3.dist-info/licenses/LICENSE",
+        "bytes": 197,
+        "sha256": "cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48"
+      },
+      {
+        "path": "packaging-26.3.dist-info/licenses/LICENSE.APACHE",
+        "bytes": 10174,
+        "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+      },
+      {
+        "path": "packaging-26.3.dist-info/licenses/LICENSE.BSD",
+        "bytes": 1344,
+        "sha256": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5"
+      }
+    ]
+  },
+  {
+    "package": "astropy-iers-data",
+    "version": "0.2026.11.2.0.34.55",
+    "archive_sha256": "785cd5bc193d9206316bd7c786fe0647e212ebf017cd861beabedd91cbe585bf",
+    "notices": [
+      {
+        "path": "astropy_iers_data-0.2026.11.2.0.34.55.dist-info/licenses/LICENSE.rst",
+        "bytes": 1491,
+        "sha256": "05d8ec3643773431cb5447b10711f119d79955470cdfbb8ca2e670a4432a153c"
+      }
+    ]
+  },
+  {
+    "package": "CPython",
+    "version": "3.14.4",
+    "notices": [
+      {
+        "path": "Python-3.14.4/LICENSE",
+        "bytes": 13804,
+        "sha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231"
+      }
+    ]
+  }
+]

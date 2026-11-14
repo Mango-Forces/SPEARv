@@ -1,0 +1,824 @@
+/* SPEARv shell: near-black solid surfaces, lime reserved for selected, active
+ * or primary things. The single top bar is one horizontally scrollable rail:
+ * it never wraps into a second row. Main controls dock at the left edge;
+ * catalog layers, spectrum and Share use persistent right-edge overlays. */
+
+:root {
+  color-scheme: dark;
+  --ground: #040506;
+  --panel: #090a0b;
+  --panel-2: #0e1011;
+  --raised: #141719;
+  --sunken: #030404;
+  --line: #1c2023;
+  --line-strong: #2c3136;
+  --raised-hover: #191d1f;
+  --line-hover: #3a4147;
+  --text: #e8eaec;
+  --text-2: #a7adb3;
+  --text-3: #7d848b;
+  --accent: #c6ff2e;
+  --accent-ink: #0a0c03;
+  --danger: #e39a8f;
+  --warn: #d9b779;
+  --sans: "Google Sans", "Product Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  /* Aliases the feature stylesheets read, so their chrome follows the shell
+   * theme instead of only their standalone fallbacks. */
+  --c-ground: var(--ground);
+  --c-panel: var(--panel);
+  --c-panel-2: var(--panel-2);
+  --c-raised: var(--raised);
+  --c-sunken: var(--sunken);
+  --c-line: var(--line);
+  --c-line-strong: var(--line-strong);
+  --c-text: var(--text);
+  --c-text-2: var(--text-2);
+  --c-text-3: var(--text-3);
+  --c-accent: var(--accent);
+  --c-danger: var(--danger);
+  --c-warn: var(--warn);
+  --text-secondary: var(--text-2);
+  --text-muted: var(--text-3);
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+  color: var(--text);
+  background: var(--ground);
+  font: 14px/1.45 var(--sans);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+}
+
+button,
+input,
+select {
+  font: 500 13px/1.3 var(--sans);
+  color: var(--text);
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+button:hover:not(:disabled):not([aria-pressed="true"]) {
+  background: var(--raised-hover);
+  border-color: var(--line-hover);
+  color: var(--text);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+input,
+select {
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--sunken);
+  color: var(--text);
+  font-size: 13px;
+}
+
+input::placeholder {
+  color: var(--text-3);
+}
+
+input[type="range"] {
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ground);
+}
+
+/* Single control rail: one line at desktop widths, horizontally scrollable
+ * below that. Nothing wraps, so the header never grows a second row. */
+.topbar-shell {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.topbar-shell > .topbar {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 11.5px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar > * {
+  flex: none;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  margin-right: 18px;
+}
+
+.brand img {
+  display: block;
+  width: auto;
+  height: 23px;
+}
+
+.location {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Labels sit left of their fields, not above them. */
+.field,
+.release {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field > span,
+.release > span {
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.field input {
+  width: 8.5rem;
+  height: 34px;
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.field.fov input {
+  width: 4.2rem;
+}
+
+.release select {
+  height: 34px;
+  max-width: 11rem;
+  font-family: var(--sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.location .show,
+.location .fov-chain[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.location .show {
+  height: 34px;
+  padding: 0 18px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.location .show:hover:not(:disabled),
+.location .fov-chain[aria-pressed="true"]:hover:not(:disabled) {
+  border-color: #d4ff5c;
+  background: #d4ff5c;
+  color: var(--accent-ink);
+}
+
+/* Conditional form error: one inline message, no permanent second row. */
+.form-error {
+  color: var(--danger);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.fov-warning {
+  color: var(--warn);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.field-warning {
+  margin: 8px 12px 0;
+  color: var(--warn);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.modes {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+
+.modes button {
+  height: 34px;
+  padding: 0 20px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.modes button:last-child {
+  border-right: 0;
+}
+
+.modes button:hover:not(:disabled):not([aria-pressed="true"]) {
+  background: var(--raised-hover);
+  color: var(--text);
+}
+
+.modes button[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+
+/* Workspace: docked controls and a flexible stage. Right drawers are
+ * positioned overlays so they never resize the displayed raster. */
+.workspace {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ground);
+}
+
+.leftbar-body {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  padding: 12px 14px 16px;
+}
+
+.leftbar-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.leftbar-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.leftbar-body::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+}
+
+.leftbar-body::-webkit-scrollbar-thumb:hover {
+  background: var(--line-hover);
+}
+
+.leftbar-body section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Real disclosure folds for the left controls, matching the Specific
+ * workspace sections. Headings are clear 15px ordinary-case text with a lime
+ * marker; the fold itself adds no box chrome beyond the hairline that already
+ * separates stacked sections. The summary keeps its native list-item marker
+ * (flex would hide it) so the lime arrow stays visible. */
+.leftbar-body details {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  margin: 0;
+  padding: 0 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+
+.leftbar-body details:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.leftbar-body details > summary {
+  display: list-item;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.leftbar-body details > summary::marker {
+  color: var(--accent);
+}
+
+/* Wrapped display components keep their headings for assistive tech; the host
+ * details summary supplies the visible title so the inner heading stays
+ * visually hidden to avoid a duplicated title. */
+.leftbar-body details.leftbar-section .raw-display > h3:first-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Closed folds hide their content. Without this, an author display on a
+ * child can override the native hide and paint into the canvas. */
+.leftbar-body details:not([open]) > :not(summary) {
+  display: none;
+}
+
+.drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 16px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.drawer-title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stage {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+}
+
+.viewer {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  background: var(--sunken);
+}
+
+.viewer > .viewer-frame {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.viewer > .empty {
+  min-height: 0;
+}
+
+.empty {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  background: var(--sunken);
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.rendering {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.rendering::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--line-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+figcaption .status,
+figcaption .caption-hint,
+figcaption .delta-legend {
+  min-width: 0;
+}
+
+.swatch {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--sunken);
+}
+
+/* Three colour channels without a gradient: a solid blue base with red and
+ * amber edges. */
+.swatch.rgb {
+  background: #2e86f0;
+  box-shadow: inset 3px 0 0 #d23a2e, inset -3px 0 0 #f0a028;
+}
+
+.delta-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.delta-key {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+}
+
+.delta-key:first-child {
+  margin-left: 0;
+}
+
+.delta-key.plus {
+  background: #f0a028;
+}
+
+.delta-key.minus {
+  background: #2e86f0;
+}
+
+.delta-key.nodata {
+  border: 1px solid var(--line-strong);
+  background: var(--sunken);
+}
+
+.caption-hint {
+  color: var(--text-3);
+}
+
+.status.busy {
+  color: var(--accent);
+}
+
+.error {
+  margin: 0;
+  padding: 0 12px 10px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.release-hint {
+  margin: 0;
+  padding: 0 12px 10px;
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.release-hint button {
+  height: 24px;
+  margin-left: 6px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.slot-note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* Catalog layer rows in the layers drawer. */
+.layer-row {
+  display: grid;
+  grid-template-columns: 16px 3.2rem auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  margin-bottom: 8px;
+}
+
+.layer-row:last-of-type {
+  margin-bottom: 10px;
+}
+
+.layer-key {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid;
+}
+
+.layer-key.gaia {
+  border-color: #e6c46a;
+  border-radius: 50%;
+}
+
+.layer-key.wise {
+  border-color: #7fd3e8;
+  transform: rotate(45deg);
+}
+
+.layer-name {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.layer-row button {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.layer-row input[type="range"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.layer-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.overlay-status {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.overlay-failure {
+  grid-column: 1 / -1;
+  color: var(--danger);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1100px) {
+  .field input {
+    width: 7.5rem;
+  }
+
+  .release select {
+    max-width: 9rem;
+  }
+}
+
+/* Tighten the one-line rail so 1280px still shows the whole header with the
+ * icon-only Share at the far end. The rail may scroll internally below this,
+ * but the page itself never gains a horizontal scrollbar. */
+@media (max-width: 1350px) {
+  .topbar {
+    gap: 6px;
+    padding: 8px 11.5px;
+  }
+
+  .location {
+    gap: 8px;
+  }
+
+  .field,
+  .release {
+    gap: 4px;
+  }
+
+  .field input {
+    width: 8rem;
+  }
+
+  .release select {
+    max-width: 9rem;
+  }
+
+  .modes button {
+    padding: 0 10px;
+  }
+
+
+
+  .location .show {
+    height: 32px;
+    padding: 0 14px;
+  }
+}
+
+.topbar-shell[data-cue="true"] {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar-shell[data-cue="true"] .topbar {
+  border-bottom: 0;
+}
+
+.rail-cue {
+  display: inline-flex;
+  flex: none;
+  width: 36px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--accent);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.rail-cue:hover:not(:disabled) {
+  background: var(--raised-hover);
+  color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    scrollbar-width: auto;
+    scrollbar-color: var(--accent) var(--line);
+  }
+
+  .topbar::-webkit-scrollbar { height: 8px; }
+  .topbar::-webkit-scrollbar-track { background: var(--line); }
+  .topbar::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rendering::before {
+    animation: none;
+  }
+
+  button {
+    transition: none;
+  }
+}
+
+
+
+/* Extras drawer: Spectrum / Layers switcher at the top. */
+.extras-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--sunken);
+}
+
+.extras-switch__label {
+  min-width: 5.5rem;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.extras-switch__arrow {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.extras-switch__arrow:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line-hover);
+}
+
+/* One compact geometry pair; the chain changes draft editing, not the image. */
+.fov-pair {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fov-chain {
+  width: 28px;
+  height: 34px;
+  padding: 0;
+  color: var(--text-2);
+}
+
+.invalid-link {
+  max-width: 560px;
+  padding: 24px;
+}
+
+.invalid-link h1 {
+  margin-bottom: 12px;
+}
+
+.invalid-link .error {
+  padding: 0 0 8px;
+}

@@ -4,7 +4,6 @@
 
 pub mod bucket;
 pub mod crawl;
-mod fits;
 pub mod http;
 mod row;
 

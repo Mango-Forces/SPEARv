@@ -1,0 +1,17 @@
+[package]
+name = "spearv-spherex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+spearv-core.workspace = true
+spearv-fits.workspace = true
+spearv-index = { workspace = true, features = ["client"] }
+async-trait.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+axum.workspace = true

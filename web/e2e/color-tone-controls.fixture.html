@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tone controls fixture</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React, { useCallback, useMemo, useState } from "react"
+      import { createRoot } from "react-dom/client"
+      import { ToneControls } from "/src/features/mosaic/CompositeDisplayControls.tsx"
+      import { colorPointError, DEFAULT_DISPLAY, normalizeDisplay, resolveDisplay, writeDisplay } from "/src/url-state/display.ts"
+
+      const initialMetadata = () => ({
+        source_recipe: { mode: "composite" },
+        channels: [{ index: 0, default_black: 100, default_span: 900 }],
+      })
+
+      function Fixture() {
+        const [display, setDisplay] = useState(() => normalizeDisplay(DEFAULT_DISPLAY))
+        const [metadata, setMetadata] = useState(initialMetadata)
+        const [commits, setCommits] = useState(0)
+        const [colorCommits, setColorCommits] = useState(0)
+        const resolved = useMemo(() => resolveDisplay(display, metadata), [display, metadata])
+        const onChange = useCallback((next) => {
+          setCommits((count) => count + 1)
+          setDisplay((current) => normalizeDisplay({ ...current, composite: { ...current.composite, ...next } }))
+        }, [])
+        const onColorChange = useCallback((next) => {
+          setColorCommits((count) => count + 1)
+          setDisplay((current) => normalizeDisplay({ ...current, color: { ...current.color, r: { ...current.color.r, ...next } } }))
+        }, [])
+        const params = new URLSearchParams()
+        writeDisplay(params, display)
+        const channel = metadata.channels[0]
+        window.__applyNewMetadata = () =>
+          setMetadata({ source_recipe: { mode: "composite" }, channels: [{ index: 0, default_black: 300, default_span: 400 }] })
+        // Stand in for a URL that carries manual Color points while no metadata is loaded.
+        window.__applyColorManual = (low, high) =>
+          setDisplay((current) =>
+            normalizeDisplay({ ...current, color: { ...current.color, r: { ...current.color.r, blackWhite: { mode: "manual", low, high } } } }),
+          )
+        return React.createElement(
+          React.Fragment,
+          null,
+          React.createElement("output", { "data-testid": "mode" }, display.composite.blackWhite.mode),
+          React.createElement("output", { "data-testid": "commits" }, String(commits)),
+          React.createElement("output", { "data-testid": "bw" }, params.get("bw_c") ?? ""),
+          React.createElement("output", { "data-testid": "auto-points" }, `${channel.default_black}:${channel.default_span}`),
+          React.createElement("output", { "data-testid": "resolved" }, `${resolved.layers[0]?.low ?? "none"}:${resolved.layers[0]?.span ?? "none"}`),
+          React.createElement(
+            "button",
+            { id: "new-metadata", type: "button", onClick: () => window.__applyNewMetadata() },
+            "New metadata",
+          ),
+          React.createElement(
+            "div",
+            { "data-testid": "composite-tone" },
+            React.createElement(ToneControls, {
+              label: "Composite",
+              value: display.composite,
+              resolved: resolved.layers[0],
+              onChange,
+            }),
+          ),
+          React.createElement("output", { "data-testid": "mode-color" }, display.color.r.blackWhite.mode),
+          React.createElement("output", { "data-testid": "commits-color" }, String(colorCommits)),
+          React.createElement("output", { "data-testid": "bw-color" }, params.get("bw_r") ?? ""),
+          React.createElement(
+            "div",
+            { "data-testid": "color-tone" },
+            React.createElement(ToneControls, {
+              label: "Red",
+              value: display.color.r,
+              // No metadata yet: stored manual points must still show and be checked.
+              resolved: undefined,
+              onChange: onColorChange,
+              pointPolicy: colorPointError,
+            }),
+          ),
+        )
+      }
+
+      createRoot(document.getElementById("root")).render(React.createElement(Fixture))
+    </script>
+  </body>
+</html>

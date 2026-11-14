@@ -1,0 +1,164 @@
+/* Catalog marker layer. ImageViewport owns the displayed picture geometry;
+ * the SVGs below use the image's native pixels as their coordinate system.
+ * Marker radii are divided by the effective display scale in React, which keeps
+ * each ring a fixed number of screen pixels at any view size.
+ *
+ * Catalog toggles and status live in the shell layers drawer; this stream
+ * carries no controls of its own. Chrome colours read the shell's tokens.
+ * The fallbacks are the SPEARv palette itself, so this stream looks right on
+ * its own and follows the shell once it defines the same names. */
+
+.viewer-frame {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.viewer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.frame-row {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--sunken, #030404);
+}
+
+.overlay-frame {
+  position: relative;
+  flex: none;
+  /* ImageViewport sizes and translates this picture stack. */
+  width: 100%;
+  height: 100%;
+}
+
+.overlay-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: auto;
+  cursor: crosshair;
+}
+
+/* Coordinates under the pointer. Solid, hairline-bordered, monospace numbers;
+ * ImageViewport renders this HUD outside the translated picture layer, and it
+ * never intercepts a pick. */
+.coord-readout {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.7rem;
+  max-width: calc(100% - 1rem);
+  padding: 0.18rem 0.4rem;
+  background: var(--panel-2, #0e1011);
+  border: 1px solid var(--line-strong, #2c3136);
+  color: var(--text-secondary, #a7adb3);
+  font: 0.72rem/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* The SVG element covers the picture exactly, so the native-pixel viewBox
+ * maps 1:1 onto displayed pixels. The layer itself never intercepts clicks;
+ * only the marker shapes do, and they forward the click as a pixel pick. */
+.markers {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.markers .marker {
+  pointer-events: auto;
+  cursor: crosshair;
+  outline: none;
+}
+
+/* Hollow rings with a dark under-stroke: the star at the centre stays visible,
+ * and the marker reads on both the black sky and the grey delta background.
+ * Gaia is a circle; WISE is a diamond. Shape carries the distinction as well
+ * as colour. */
+.markers .marker-halo,
+.markers .marker-shape {
+  fill: none;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.markers .marker-halo {
+  stroke: var(--sunken, #030404);
+  stroke-opacity: 0.85;
+  stroke-width: 3.6px;
+}
+
+.markers .marker-shape {
+  stroke-width: 1.3px;
+}
+
+.markers.gaia .marker-shape {
+  stroke: #ffd166;
+}
+
+.markers.wise .marker-shape {
+  stroke: #8fe3ff;
+}
+
+/* The visible ring is deliberately small; the transparent hit target keeps
+ * picking a marker comfortable. */
+.markers .marker-hit {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.markers .marker:hover .marker-shape,
+.markers .marker:focus-visible .marker-shape {
+  stroke-width: 2.3px;
+}
+
+.marker-tip {
+  position: absolute;
+  transform: translate(0.6rem, -50%);
+  pointer-events: none;
+  white-space: nowrap;
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.15rem 0.45rem;
+  background: var(--raised, #141719);
+  border: 1px solid var(--line-strong, #2c3136);
+  color: var(--text, #e8eaec);
+  font: 0.75rem/1.3 ui-sans-serif, system-ui, sans-serif;
+}
+
+.marker-tip span {
+  color: var(--text-secondary, #a7adb3);
+}
+
+@media (max-width: 760px) {
+  .frame-row {
+    width: 100%;
+  }
+}
+
+/* The right drawer already titles this panel "Spectrum", so the hosted
+ * spectrum panel's own heading stays for grouping and screen readers but
+ * takes no second visible title. The section label keeps its name. */
+#drawer-spectrum .spectrum-panel-head h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

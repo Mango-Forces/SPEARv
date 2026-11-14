@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 spearv-core.workspace = true
 spearv-index = { workspace = true, features = ["store"] }
+spearv-spherex.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 futures.workspace = true

@@ -168,19 +168,17 @@ mod tests {
 
     async fn serve() -> Served {
         let (db, store) = TempDb::open("http");
-        let rows: Vec<ExposureRow> = [
+        let mut rows: Vec<ExposureRow> = Vec::new();
+        for (key, flags, ra) in [
             (key("qr2", "2025W34_2B", "l2b-v20-2025-267", 2, 1), "all_sky", 56.8),
             (key("qr2", "2025W35_1A", "l2b-v20-2025-270", 2, 1), "deep_north", 56.8),
             (key("qr3", "2026W40_2A", "l2b-v27-2026-285", 1, 1), "all_sky", 56.8),
             (key("qr3", "2026W40_2A", "l2b-v27-2026-285", 1, 2), "all_sky", 150.0),
-        ]
-        .into_iter()
-        .map(|(key, flags, ra)| {
+        ] {
             let card = format!("HIERARCH SPS_FLAGS = '{flags}' / survey");
             let prefix = fits_prefix(parse_key(&key).unwrap().detector, ra, 24.0, &[card.as_str()]);
-            row_from_header(&Object { key, etag: Some("\"e\"".into()), size: Some(1) }, &prefix).unwrap()
-        })
-        .collect();
+            rows.push(row_from_header(&Object { key, etag: Some("\"e\"".into()), size: Some(1) }, &prefix).await.unwrap());
+        }
         store.upsert(&rows).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -189,7 +187,7 @@ mod tests {
         Served { client: IndexClient::new(format!("http://{addr}/")).unwrap(), store, _db: db }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_client_reads_coverage_passes_releases_and_generation() {
         let s = serve().await;
         let all = s.client.coverage(&CoverageQuery::view(56.8, 24.0, 0.2)).await.unwrap();
@@ -214,7 +212,7 @@ mod tests {
         assert_eq!(s.client.generation_id().await.unwrap(), s.store.generation().unwrap());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_bad_query_is_a_400_with_a_reason() {
         let s = serve().await;
         let out_of_sky = s.client.coverage(&CoverageQuery::view(10.0, 95.0, 1.0)).await.unwrap_err();
@@ -228,7 +226,7 @@ mod tests {
         assert_eq!(survey.status(), 400);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn health_reports_rows_and_the_last_crawl() {
         let s = serve().await;
         let health = s.client.health_report().await.unwrap();
@@ -243,7 +241,7 @@ mod tests {
         assert_eq!(health.last_crawl, Some(record));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_client_serves_as_the_core_index_service() {
         let s = serve().await;
         let index: &dyn spearv_core::IndexService = &s.client;
@@ -252,7 +250,7 @@ mod tests {
         assert_eq!((health["status"].as_str(), health["exposures"].as_i64()), (Some("ok"), Some(4)));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_unreachable_service_is_unavailable_not_a_bad_query() {
         let client = IndexClient::new("http://127.0.0.1:9").unwrap();
         let err = client.generation_id().await.unwrap_err();

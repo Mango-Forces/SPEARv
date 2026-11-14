@@ -1,0 +1,136 @@
+/* Colour channel rows: Red / Green / Blue with a channel swatch and aligned
+ * Band / Width columns. The host folding panel already titles this section
+ * (summary Colour), so the fieldset legend stays accessible but visually
+ * hidden. Chrome reads the shell tokens with the SPEARv palette as fallbacks:
+ * near-black ground, panel chrome, lime accent. No caps, no monospace. */
+
+.colour-config {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+/* Kept for grouping / disabled semantics; the host panel supplies the title. */
+.colour-legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.colour-config:disabled {
+  opacity: 0.55;
+}
+
+.colour-head,
+.colour-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 76px 76px;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.colour-head {
+  margin: 4px 0 2px;
+  color: var(--text-2, #a7adb3);
+  font-family: var(--sans, "Google Sans", sans-serif);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.colour-head span:nth-child(3),
+.colour-head span:nth-child(4) {
+  text-align: right;
+}
+
+.colour-row {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line, #1c2023);
+}
+
+.colour-row:last-of-type {
+  border-bottom: 0;
+}
+
+.colour-chip {
+  width: 10px;
+  height: 10px;
+  justify-self: center;
+  border-radius: 3px;
+  background: var(--text-3, #7d848b);
+}
+
+.colour-chip.r { background: #d23a2e; }
+.colour-chip.g { background: #3fa34d; }
+.colour-chip.b { background: #2e86f0; }
+
+.colour-name {
+  color: var(--text, #e8eaec);
+  font-family: var(--sans, "Google Sans", sans-serif);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.colour-config label {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+/* Each input already has an accessible name; the per-row words stay
+ * screen-reader only so the visible Band / Width header owns the columns. */
+.colour-config label > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.colour-config input {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--sunken, #030404);
+  border: 1px solid var(--line-strong, #2c3136);
+  border-radius: 4px;
+  color: var(--text, #e8eaec);
+  font-family: var(--sans, "Google Sans", sans-serif);
+  font-size: 13px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.colour-config input::-webkit-outer-spin-button,
+.colour-config input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.colour-config input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.colour-config input:focus-visible {
+  outline: 2px solid var(--accent, #c6ff2e);
+  outline-offset: 1px;
+}
+
+.colour-note {
+  margin: 6px 0 0;
+  color: var(--text-3, #7d848b);
+  font-family: var(--sans, "Google Sans", sans-serif);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.colour-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.colour-actions button { font: inherit; font-size: 13px; color: var(--text, #e8eaec); background: var(--panel, #111416); border: 1px solid var(--line-strong, #394047); border-radius: 4px; padding: 6px 8px; cursor: pointer; }
+.colour-actions button:hover:not(:disabled) { border-color: var(--accent, #c6ff2e); }
+.colour-actions button:focus-visible { outline: 2px solid var(--accent, #c6ff2e); outline-offset: 2px; }
+.colour-error { color: var(--danger, #ff9494); font-size: 13px; line-height: 1.5; }

@@ -8,22 +8,37 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Json;
 use serde_json::{json, Value};
+use spearv_composite::Composite;
 use spearv_core::{env, Cache, Context, Extension, IndexService, WorkBudget};
+use spearv_delta::Delta;
+use spearv_embed::Embed;
 use spearv_index::client::IndexClient;
+use spearv_overlay::Overlay;
+use spearv_science::{PythonMath, RuntimeConfig};
+use spearv_spherex::SpherexSource;
+use spearv_spectrum::Spectrum;
 use utoipa::openapi::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 
 /// The extensions the binder mounts, one line each. `/health` reports the same
 /// list, so a route cannot appear without its id there.
-fn extensions() -> &'static [&'static dyn Extension] {
-    &[]
+fn extensions() -> Vec<Box<dyn Extension>> {
+    vec![
+        Box::new(Composite),
+        Box::new(Spectrum),
+        Box::new(Delta),
+        Box::new(Overlay),
+        Box::new(Embed),
+    ]
 }
 
 #[tokio::main]
 async fn main() {
     match parse(std::env::args().skip(1)) {
         Ok(Command::OpenApi(path)) => {
-            let json = openapi(extensions()).to_pretty_json().expect("openapi json");
+            let extensions = extensions();
+            let refs = extensions.iter().map(|extension| extension.as_ref()).collect::<Vec<_>>();
+            let json = openapi(&refs).to_pretty_json().expect("openapi json");
             match path {
                 Some(path) => std::fs::write(path, json).expect("write spec"),
                 None => println!("{json}"),
@@ -31,6 +46,8 @@ async fn main() {
         }
         Ok(Command::Serve) => {
             let ctx = context();
+            let extensions = extensions();
+            let refs = extensions.iter().map(|extension| extension.as_ref()).collect::<Vec<_>>();
             let port = env::number("SPEARV_PORT", 8080_u16);
             // Loopback by default. A container needs 0.0.0.0, or the port is unreachable.
             let host = std::env::var("SPEARV_HOST").unwrap_or_else(|_| "127.0.0.1".into());
@@ -39,7 +56,7 @@ async fn main() {
                 .await
                 .unwrap_or_else(|err| panic!("bind {addr}: {err}"));
             println!("spearv listening on http://{addr}");
-            serve(extensions(), ctx, listener, shutdown_signal()).await.expect("server");
+            serve(&refs, ctx, listener, shutdown_signal()).await.expect("server");
         }
         Err(message) => {
             eprintln!("{message}");
@@ -48,14 +65,49 @@ async fn main() {
     }
 }
 
-/// The served context: the process budget and the index-service at `index_url()`.
+/// The served context: the SPHEREx source, the process budget, the image math
+/// backend, and the index-service at `index_url()`.
 fn context() -> Arc<Context> {
     let index = Arc::new(IndexClient::new(index_url()).expect("index-service client"));
-    Arc::new(
-        Context::new(Arc::new(Cache::new()))
-            .with_budget(Arc::new(WorkBudget::from_env()))
-            .with_index(index),
-    )
+    let budget = Arc::new(WorkBudget::from_env());
+    // The library owns the image math, so the process cannot serve without it.
+    // A missing or foreign runtime is a deployment fault and stops the server
+    // here instead of failing every mosaic later.
+    let config = RuntimeConfig::from_env();
+    let math = PythonMath::initialize(config.clone(), Arc::clone(&budget)).unwrap_or_else(|error| {
+        panic!(
+            "image math runtime at {} is not usable: {error}; set SPEARV_PYTHON_PREFIX to the private runtime",
+            config.executable.display()
+        )
+    });
+    let mut ctx = context_with(index, budget, Arc::new(math));
+    register_catalogs(&mut ctx);
+    Arc::new(ctx)
+}
+
+/// Register the catalogs the overlay reads. A catalog that is not provisioned
+/// is reported and skipped; the rest of the server still starts.
+fn register_catalogs(ctx: &mut Context) {
+    spearv_gaia::GaiaStore::register(&mut ctx.catalogs);
+    match spearv_wise::AllWise::from_env() {
+        Ok(source) => ctx.register_catalog(Arc::new(source)),
+        Err(error) => eprintln!("no AllWISE catalog: {error}"),
+    }
+}
+
+/// The context once every dependency is in hand, so tests can substitute them.
+fn context_with(
+    index: Arc<IndexClient>,
+    budget: Arc<WorkBudget>,
+    math: Arc<dyn spearv_core::math::ImageMath>,
+) -> Context {
+    let source = SpherexSource::with_index(Arc::clone(&index)).expect("SPHEREx source");
+    let mut ctx = Context::new(Arc::new(Cache::new()))
+        .with_budget(budget)
+        .with_math(math)
+        .with_index(index);
+    ctx.register_image(Arc::new(source));
+    ctx
 }
 
 /// Where the index-service answers, from `SPEARV_INDEX_URL`.
@@ -98,7 +150,7 @@ fn openapi(extensions: &[&dyn Extension]) -> OpenApi {
 
 /// Start every extension, serve until `signal`, then shut every extension down once.
 async fn serve(
-    extensions: &'static [&'static dyn Extension],
+    extensions: &[&dyn Extension],
     ctx: Arc<Context>,
     listener: tokio::net::TcpListener,
     signal: impl Future<Output = ()> + Send + 'static,
@@ -275,6 +327,29 @@ mod tests {
 
     static PROBE: Probe = Probe { started: AtomicUsize::new(0), stopped: AtomicUsize::new(0) };
 
+    /// A math backend that fails every call. Context wiring only needs the
+    /// backend to be present, not to do any work.
+    struct NoMath;
+
+    impl spearv_core::math::ImageMath for NoMath {
+        fn session(
+            &self,
+            _control: spearv_core::math::MathControl,
+            _tile: spearv_core::math::Tile,
+            _product: spearv_core::math::Product,
+        ) -> spearv_core::math::MathResult<Box<dyn spearv_core::math::MathSession>> {
+            Err(spearv_core::math::MathError::Runtime("test stub".into()))
+        }
+
+        fn spectrum(
+            &self,
+            _control: &spearv_core::math::MathControl,
+            _input: &spearv_core::math::SpectrumInput,
+        ) -> spearv_core::math::MathResult<spearv_core::math::Pinned<spearv_core::math::SpectrumPlanes>> {
+            Err(spearv_core::math::MathError::Runtime("test stub".into()))
+        }
+    }
+
     struct Stars;
 
     #[async_trait]
@@ -368,15 +443,51 @@ mod tests {
     }
 
     #[test]
-    fn the_served_context_installs_the_index_client() {
-        assert!(super::context().index().is_some());
+    fn the_served_context_registers_the_source_the_math_and_the_index() {
+        let index = Arc::new(IndexClient::new("http://127.0.0.1:9").expect("client"));
+        let budget = Arc::new(WorkBudget::default());
+        let ctx = context_with(index, budget, Arc::new(NoMath));
+        assert!(ctx.index().is_some());
+        assert!(ctx.math().is_ok());
+        assert_eq!(ctx.images.keys().map(|id| id.0.as_str()).collect::<Vec<_>>(), ["spherex"]);
     }
 
     #[test]
-    fn the_spec_lists_only_extension_routes() {
-        let spec = openapi(extensions());
+    fn the_served_context_registers_the_wise_catalog() {
+        let dir = std::env::temp_dir().join(format!("spearv-wise-{}", std::process::id()));
+        std::env::set_var("SPEARV_WISE_CACHE", &dir);
+        std::env::set_var("SPEARV_GAIA", dir.join("missing.sqlite"));
+        let mut ctx = Context::new(Arc::new(Cache::new()));
+        register_catalogs(&mut ctx);
+        assert!(ctx.catalogs.contains_key(&spearv_core::SourceId::new("wise")));
+        std::env::remove_var("SPEARV_WISE_CACHE");
+        std::env::remove_var("SPEARV_GAIA");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_spec_lists_every_mounted_extension() {
+        let extensions = extensions();
+        let ids = extensions.iter().map(|extension| extension.id()).collect::<Vec<_>>();
+        assert_eq!(ids, ["composite", "spectrum", "delta", "overlay", "embed"]);
+        let refs = extensions.iter().map(|extension| extension.as_ref()).collect::<Vec<_>>();
+        let spec = openapi(&refs);
         assert_eq!(spec.info.title, "SPEARv");
-        assert!(spec.paths.paths.is_empty(), "{:?}", spec.paths.paths.keys());
+        let paths = spec.paths.paths.keys().map(String::as_str).collect::<Vec<_>>();
+        for path in [
+            "/api/v1/coverage",
+            "/api/v1/releases",
+            "/api/v1/render.png",
+            "/api/v1/color.png",
+            "/api/v1/mosaic",
+            "/api/v1/spectrum",
+            "/api/v1/delta.png",
+            "/api/v1/delta/candidates",
+            "/api/v1/catalog/{source}",
+            "/embed",
+        ] {
+            assert!(paths.contains(&path), "missing {path}; have {paths:?}");
+        }
         let spec = openapi(&[&PROBE as &dyn Extension]);
         let paths = spec.paths.paths.keys().map(String::as_str).collect::<Vec<_>>();
         assert_eq!(paths, ["/api/v1/probe"]);

@@ -2,11 +2,29 @@
 /// not an interpolation. CSS scales the PNG; the server does not invent resolution.
 pub const PIXEL_SCALE_DEG: f64 = 6.15 / 3600.0;
 
-/// The PNG click grid stops at this many pixels on a side; [`TanGrid`] has no cap.
-const MAX_GRID_PIXELS: u32 = 4096;
+/// A render PNG's grid stops at this many pixels. The render routes reject a
+/// wider field instead of cropping it; the mosaic's [`TanGrid`] has no cap.
+pub const MAX_RENDER_PIXELS: u32 = 4096;
+
+/// The widest field a render PNG draws at the native scale before the
+/// [`MAX_RENDER_PIXELS`] clamp would crop it.
+pub const MAX_RENDER_FOV_DEG: f64 = MAX_RENDER_PIXELS as f64 * PIXEL_SCALE_DEG;
 
 pub fn grid_size(fov_deg: f64) -> u32 {
-    ((fov_deg / PIXEL_SCALE_DEG).round() as u32).clamp(1, MAX_GRID_PIXELS)
+    ((fov_deg / PIXEL_SCALE_DEG).round() as u32).clamp(1, MAX_RENDER_PIXELS)
+}
+
+/// The side of a render PNG's grid, or an error when [`grid_size`] would clamp
+/// and the PNG would silently show only the centre of the requested field.
+/// The mosaic keeps the true size on a [`TanGrid`] and does not call this.
+pub fn render_grid_size(fov_deg: f64) -> crate::Result<u32> {
+    let side = (fov_deg / PIXEL_SCALE_DEG).round();
+    if !(0.0..=f64::from(MAX_RENDER_PIXELS)).contains(&side) {
+        return Err(crate::Error::Message(format!(
+            "render images stop at {MAX_RENDER_FOV_DEG:.3} degrees (4096 px at the native scale); use /api/v1/mosaic for a wider field"
+        )));
+    }
+    Ok(side.max(1.0) as u32)
 }
 
 /// Inclusive 0-based FITS bounds of the common-grid pixels that can sample a
@@ -334,5 +352,14 @@ mod tests {
     fn a_detector_that_misses_the_grid_has_no_bounds() {
         let grid = TanGrid::new(10.0, 20.0, 0.1);
         assert_eq!(grid.detector_bounds(&detector_wcs(2040)), None);
+    }
+
+    #[test]
+    fn a_render_rejects_the_field_the_grid_would_crop() {
+        assert_eq!(render_grid_size(0.1).unwrap(), 59);
+        assert!(render_grid_size(6.99).is_ok());
+        let error = render_grid_size(7.0).expect_err("7 degrees cannot be drawn at 4096 px");
+        assert!(error.to_string().contains("6.997"), "{error}");
+        assert_eq!(TanGrid::new(56.75, 24.12, 10.0).width, 5854, "the mosaic grid keeps the true size");
     }
 }

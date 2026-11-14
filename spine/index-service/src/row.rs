@@ -3,7 +3,7 @@
 use spearv_index::{ExposureRow, Quality, Survey, BUCKET};
 
 use crate::bucket::Object;
-use crate::fits::{image_header, CardMap};
+use spearv_spherex::header::{image_header, CardMap};
 
 /// Enough for the primary and IMAGE headers of every Level 2 file. A QR3
 /// IMAGE header ends at 28.8 KB.
@@ -61,9 +61,9 @@ fn detector_range(detector: u8) -> Option<(f64, f64)> {
     }
 }
 
-pub(crate) fn row_from_header(object: &Object, prefix: &[u8]) -> Result<ExposureRow, String> {
+pub(crate) async fn row_from_header(object: &Object, prefix: &[u8]) -> Result<ExposureRow, String> {
     let parsed = parse_key(&object.key).ok_or_else(|| format!("{} is not an exposure key", object.key))?;
-    let (cards, wcs) = image_header(prefix).map_err(|err| format!("{}: {err}", object.key))?;
+    let (cards, wcs) = image_header(prefix).await.map_err(|err| format!("{}: {err}", object.key))?;
     if let Some(detector) = cards.integer("DETECTOR") {
         if detector != i64::from(parsed.detector) {
             return Err(format!("{}: header says detector {detector}", object.key));
@@ -127,7 +127,7 @@ fn flag(cards: &CardMap, key: &str) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{fits_prefix, key};
+    use crate::testing::{card, fits_prefix, header_prefix, key};
 
     #[test]
     fn keys_name_release_period_version_detector_and_obsid() {
@@ -158,8 +158,8 @@ mod tests {
         assert!(detector_range(0).is_none() && detector_range(7).is_none());
     }
 
-    #[test]
-    fn a_qr3_header_fills_quality_contamination_and_position() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_qr3_header_fills_quality_contamination_and_position() {
         let object = Object { key: key("qr3", "2026W40_2A", "l2b-v27-2026-285", 1, 1), etag: Some("\"x\"".into()), size: Some(65_131_200) };
         let prefix = fits_prefix(1, 232.66, -10.72, &[
             "HIERARCH SPS_FLAGS = 'deep_north' / Flags defined by Survey Planning",
@@ -175,7 +175,7 @@ mod tests {
             "Y_SC    =  -5263.1833287560785 / [km] Exposure MID y position",
             "Z_SC    =    4461.523818027163 / [km] Exposure MID z position",
         ]);
-        let row = row_from_header(&object, &prefix).unwrap();
+        let row = row_from_header(&object, &prefix).await.unwrap();
         assert_eq!(row.release, "qr3");
         assert_eq!(row.survey, Survey::Deep);
         assert_eq!(row.sps_flags.as_deref(), Some("deep_north"));
@@ -198,20 +198,107 @@ mod tests {
         assert_eq!(row.wcs.crval, [232.66, -10.72]);
     }
 
-    #[test]
-    fn a_qr2_header_without_contamination_cards_is_all_sky_with_nones() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_qr2_header_without_contamination_cards_is_all_sky_with_nones() {
         let object = Object { key: key("qr2", "2025W34_2B", "l2b-v20-2025-267", 2, 501), etag: None, size: None };
-        let row = row_from_header(&object, &fits_prefix(2, 56.75, 24.12, &["HIERARCH SPS_FLAGS = 'all_sky ' / survey"])).unwrap();
+        let row = row_from_header(&object, &fits_prefix(2, 56.75, 24.12, &["HIERARCH SPS_FLAGS = 'all_sky ' / survey"])).await.unwrap();
         assert_eq!(row.survey, Survey::AllSky);
         assert_eq!(row.quality.aurora, None);
         assert_eq!(row.quality.n_streaks, None);
         assert_eq!(row.sc_xyz, None);
     }
 
-    #[test]
-    fn a_header_that_disagrees_with_its_key_is_refused() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_header_that_disagrees_with_its_key_is_refused() {
         let object = Object { key: key("qr3", "2026W40_2A", "l2b-v27-2026-285", 3, 1), etag: None, size: None };
-        assert!(row_from_header(&object, &fits_prefix(1, 10.0, 10.0, &[])).unwrap_err().contains("detector 1"));
-        assert!(row_from_header(&object, b"not fits").is_err());
+        assert!(row_from_header(&object, &fits_prefix(1, 10.0, 10.0, &[])).await.unwrap_err().contains("detector 1"));
+        assert!(row_from_header(&object, b"not fits").await.is_err());
+    }
+
+    /// The IMAGE cards of a header with `wcs` lines in place of the CD matrix and SIP orders.
+    fn image(wcs: &[&str]) -> Vec<u8> {
+        let base = [
+            "XTENSION= 'IMAGE   '",
+            "BITPIX  =                  -32",
+            "NAXIS   =                    2",
+            "NAXIS1  =                 2040",
+            "NAXIS2  =                 2040",
+            "EXTNAME = 'IMAGE   '",
+            "CRPIX1  =               1020.5",
+            "CRPIX2  =               1020.5",
+            "CRVAL1  =         270.14600000",
+            "CRVAL2  =          66.52300000",
+        ];
+        header_prefix(&base.iter().chain(wcs).map(|line| card(line)).collect::<Vec<_>>())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_cd_matrix_header_reads_cards_and_wcs() {
+        let (cards, wcs) = image_header(&fits_prefix(3, 232.66, -10.72, &["HIERARCH L2 SATSTRKS = 3 / streaks"])).await.unwrap();
+        assert_eq!(cards.integer("DETECTOR"), Some(3));
+        assert_eq!(cards.integer("L2 SATSTRKS"), Some(3));
+        assert_eq!(wcs.crval, [232.66, -10.72]);
+        assert_eq!(wcs.cd, [[-0.001708333, 0.0], [0.0, 0.001708333]]);
+        assert_eq!(wcs.naxis, [2040, 2040]);
+        assert!(wcs.sip.ap.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_pc_and_cdelt_header_with_sip_reads_every_polynomial() {
+        let prefix = image(&[
+            "CTYPE1  = 'RA---TAN-SIP'",
+            "CTYPE2  = 'DEC--TAN-SIP'",
+            "RADESYS = 'ICRS    '",
+            "LONPOLE =                180.0",
+            "CDELT1  =         -0.001708333",
+            "CDELT2  =          0.001708333",
+            "PC1_1   =                  0.5",
+            "PC1_2   =                 0.25",
+            "PC2_1   =                -0.25",
+            "PC2_2   =                  0.5",
+            "A_ORDER =                    2",
+            "A_0_2   =              1.5D-06 / Fortran exponent",
+            "B_ORDER =                    2",
+            "B_1_1   =             -2.5E-07",
+            "AP_ORDER=                    1",
+            "AP_1_0  =               1.0E-4",
+            "BP_ORDER=                    1",
+        ]);
+        let (_, wcs) = image_header(&prefix).await.unwrap();
+        assert_eq!(wcs.cd, [[-0.001708333 * 0.5, -0.001708333 * 0.25], [0.001708333 * -0.25, 0.001708333 * 0.5]]);
+        assert_eq!(wcs.sip.a.order, 2);
+        assert_eq!(wcs.sip.a.eval(0.0, 2.0), 1.5e-6 * 4.0);
+        assert_eq!(wcs.sip.b.eval(1.0, 1.0), -2.5e-7);
+        assert_eq!(wcs.sip.ap.as_ref().map(|ap| ap.eval(1.0, 0.0)), Some(1.0e-4));
+        assert_eq!(wcs.sip.bp.as_ref().map(|bp| bp.order), Some(1));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_header_outside_tan_icrs_or_lonpole_180_is_refused() {
+        let orders = ["A_ORDER =                    0", "B_ORDER =                    0"];
+        for (lines, reason) in [
+            (vec!["CTYPE1  = 'RA---SIN'", "CTYPE2  = 'DEC--SIN'"], "projection"),
+            (vec!["CTYPE1  = 'RA---TAN'", "CTYPE2  = 'DEC--TAN'", "RADESYS = 'FK5     '"], "ICRS"),
+            (vec!["CTYPE1  = 'RA---TAN'", "CTYPE2  = 'DEC--TAN'", "LONPOLE =                  0.0"], "LONPOLE"),
+            (vec!["CTYPE1  = 'RA---TAN-SIP'", "CTYPE2  = 'DEC--TAN-SIP'"], "SIP"),
+        ] {
+            let wcs: Vec<&str> = lines.iter().chain(&orders).copied().collect();
+            let error = image_header(&image(&wcs)).await.unwrap_err().to_string();
+            assert!(error.contains(reason), "{error}");
+        }
+        let no_order = image(&["CTYPE1  = 'RA---TAN'", "CTYPE2  = 'DEC--TAN'"]);
+        let error = image_header(&no_order).await.unwrap_err().to_string();
+        assert!(error.contains("A_ORDER"), "{error}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_short_or_foreign_prefix_is_an_error_not_a_panic() {
+        let prefix = fits_prefix(1, 10.0, 10.0, &[]);
+        for cut in [0, 79, 2880, 2880 + 80, prefix.len() - 1] {
+            assert!(image_header(&prefix[..cut]).await.is_err(), "cut at {cut}");
+        }
+        assert!(image_header(b"not fits").await.is_err());
+        let table = String::from_utf8(prefix).unwrap().replace("EXTNAME = 'IMAGE   '", "EXTNAME = 'FLAGS   '");
+        assert!(image_header(table.as_bytes()).await.is_err(), "no IMAGE extension");
     }
 }

@@ -1,0 +1,24 @@
+[package]
+name = "spearv-wise"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+spearv-core.workspace = true
+arrow-array.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+cdshealpix.workspace = true
+futures.workspace = true
+parquet.workspace = true
+reqwest.workspace = true
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net", "io-util"] }
+
+[[bin]]
+name = "spearv-wise-cone"
+path = "src/bin/cone.rs"

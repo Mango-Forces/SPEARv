@@ -1,6 +1,21 @@
 [workspace]
 resolver = "2"
-members = ["core", "index", "index-service", "binder"]
+members = [
+    "core",
+    "fits",
+    "science",
+    "index",
+    "index-service",
+    "sourcing/spherex",
+    "sourcing/wise",
+    "sourcing/gaia",
+    "extensions/composite",
+    "extensions/spectrum",
+    "extensions/delta",
+    "extensions/overlay",
+    "extensions/embed",
+    "binder",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,14 +26,42 @@ publish = false
 [workspace.dependencies]
 spearv-core = { path = "core" }
 spearv-index = { path = "index" }
+spearv-fits = { path = "fits" }
+spearv-science = { path = "science" }
+spearv-spherex = { path = "sourcing/spherex" }
+spearv-wise = { path = "sourcing/wise" }
+spearv-gaia = { path = "sourcing/gaia" }
+spearv-composite = { path = "extensions/composite" }
+spearv-spectrum = { path = "extensions/spectrum" }
+spearv-delta = { path = "extensions/delta" }
+spearv-overlay = { path = "extensions/overlay" }
+spearv-embed = { path = "extensions/embed" }
 async-trait = "0.1"
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net", "time", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net", "time", "io-util", "fs"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-axum = "0.2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 futures = "0.3"
+cc = "1"
+pyo3 = { version = "=0.27.2", default-features = false }
+numpy = "=0.27.0"
+ndarray = "=0.16.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+png = "0.18"
+tempfile = "3"
+tokio-util = { version = "0.7", features = ["io"] }
+cdshealpix = "0.10"
+parquet = { version = "60", default-features = false, features = ["arrow", "async", "snap"] }
+arrow-array = "60"
+bytes = "1"
+flate2 = "1"
+md-5 = "0.10"
+sha2 = "0.10"
+hex = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+tower = { version = "0.5", features = ["util"] }

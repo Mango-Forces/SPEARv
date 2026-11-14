@@ -1,0 +1,18 @@
+[package]
+name = "spearv-delta"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+spearv-core.workspace = true
+axum.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+serde.workspace = true
+tokio.workspace = true
+image.workspace = true
+
+[dev-dependencies]
+spearv-science.workspace = true

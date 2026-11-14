@@ -1,0 +1,26 @@
+Private science runtime notices
+
+The private runtime keeps the complete license and notice files supplied by
+each pinned wheel. They are not relabeled as the workspace license.
+notices.json records their exact identities.
+
+- CPython includes the PSF license and bundled component notices.
+- NumPy includes BSD and bundled OpenBLAS/LAPACK/GCC-runtime notices.
+- Astropy includes its top-level license and the WCSLIB LGPL v3 notice;
+  LGPL source and relinking obligations need release review.
+- ERFA, PyYAML, packaging and IERS data keep their package-specific notices.
+
+This is a recorded notice inventory, not complete legal clearance. The engine
+image that composes this runtime with the Rust binary and CFITSIO adds their
+notices.
+
+The GPL Python package named fitsio, Photutils and the unselected reprojection
+extras are not installed.
+
+Build the runtime on the host with the shared measurement lock:
+
+  flock /tmp/opencode/spearv-ab-20261113/measurement.lock taskset -c 16-19 \
+    python3 spine/runtime/build.py all
+
+Archives are pinned in manifest.json and requirements.lock and land under the
+ignored .build/runtime directory; nothing is installed on the host.
