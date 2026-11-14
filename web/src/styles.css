@@ -20,7 +20,8 @@
   --accent: #c6ff2e;
   --accent-ink: #0a0c03;
   /* Interrupt control only; not the shell accent. */
-  --stop: #e85a4f;
+  /* Rosso Corsa is #d40000; one step of red keeps it distinct. */
+  --stop: #d50000;
   --danger: #e39a8f;
   --warn: #d9b779;
   --sans: "Google Sans", "Product Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
