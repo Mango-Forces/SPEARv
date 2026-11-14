@@ -38,7 +38,7 @@ export type MosaicState = {
   /** Armed run has started; waiting for the first engine response. */
   starting?: boolean
   /** Stop the job on this page and on the engine, leaving nothing running. */
-  stop: () => void
+  stop: () => Promise<void>
   /** Run this view again under a fresh job, without a second Find click. */
   restart: () => void
 }
@@ -72,7 +72,7 @@ const IDLE: MosaicState = {
   drawing: 0,
   undrawn: 0,
   final: false,
-  stop: () => undefined,
+  stop: async () => undefined,
   restart: () => undefined,
 }
 
@@ -189,9 +189,9 @@ export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS,
     setState({ ...IDLE, stopping: true })
     if (!jobId) {
       setState(IDLE)
-      return
+      return Promise.resolve()
     }
-    void cancelJob(jobId).finally(() => {
+    return cancelJob(jobId).finally(() => {
       if (control.current.jobId) return
       setState(IDLE)
     })
@@ -745,7 +745,8 @@ export function statusText(state: MosaicState): string {
   if (state.stopping) return "Stopping"
   if (state.error) return "failed"
   if (state.reconnecting) return "Engine restarting, resuming shortly"
-  if (state.starting || !status) return "Starting mosaic"
+  if (state.starting) return "Starting mosaic"
+  if (!status) return "idle"
   const seconds = `${Math.round(status.elapsed_ms / 1000)} s`
   const size = gigabytes(status.bytes_read)
   const channels = channelText(status)

@@ -45,7 +45,7 @@ type RawControlsState = {
   colorViewKey?: string
   /** The armed mosaic for the current view is still running on the engine. */
   mosaicBusy: boolean
-  stopMosaic: () => void
+  stopMosaic: () => Promise<void>
 }
 
 const EMPTY_RAW_CONTROLS: RawControlsState = {
@@ -56,7 +56,7 @@ const EMPTY_RAW_CONTROLS: RawControlsState = {
   start: () => undefined,
   cancel: () => undefined,
   mosaicBusy: false,
-  stopMosaic: () => undefined,
+  stopMosaic: async () => undefined,
 }
 
 const LOGO = new URL("./assets/spear-logo.svg", import.meta.url).href
@@ -113,6 +113,7 @@ function ValidViewApp({ view }: { view: View }) {
   const [topRightDrawer, setTopRightDrawer] = useState<"extras" | "share">("extras")
   const [rawControls, setRawControls] = useState<RawControlsState | null>(null)
   const [find, setFind] = useState<{ key: string; run: number } | null>(null)
+  const [stopping, setStopping] = useState(false)
   const findRun = useRef(0)
   const [point, setPoint] = useState<SpectrumPointTarget | null>(null)
   const [catalogStatus, setCatalogStatus] = useState<Record<CatalogSource, CatalogState | undefined>>({
@@ -154,16 +155,21 @@ function ValidViewApp({ view }: { view: View }) {
   // the field, changing a mode or release, or editing the colour recipe retires
   // the armed run and shows Find again.
   const armed = find?.key === colorViewKey
-  // Stop for the whole armed engine job, including cancel drain. Before SkyShell
-  // has published once, treat the armed run as busy so Find does not flash back.
-  const finding = armed && (rawControls ? rawControls.mosaicBusy : true)
+  // Stop for the whole armed engine job, plus the cancel drain after disarm.
+  // Before SkyShell has published once, treat the armed run as busy so Find
+  // does not flash back.
+  const finding = stopping || (armed && (rawControls ? rawControls.mosaicBusy : true))
   const findNow = (next: View) => {
     findRun.current += 1
+    setStopping(false)
     setFind({ key: scienceViewKey(next, next.colour ?? DEFAULT_COLOUR_CONFIG), run: findRun.current })
   }
   const stopFinding = () => {
-    // Do not clear `find` here: stop() keeps mosaicBusy until DELETE finishes.
-    activeRaw.stopMosaic()
+    setStopping(true)
+    const stop = activeRaw.stopMosaic()
+    // Disarm immediately so useMosaic does not start a new job after cancel.
+    setFind(null)
+    void Promise.resolve(stop).finally(() => setStopping(false))
   }
 
   // A narrow header is a rail. Show a control only while content remains to
