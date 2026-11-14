@@ -576,7 +576,13 @@ impl Job {
         let rows = grid.height.div_ceil(TILE);
         let tiles = (cols * rows) as usize;
         let reads = spearv_core::env::number("SPEARV_MOSAIC_READS", READS).max(1);
-        let stacks = std::thread::available_parallelism().map_or(4, usize::from);
+        // Stack concurrency must not exceed math workers: each stack holds a
+        // worker via try_acquire, and exhaustion fails the whole job.
+        let workers = spearv_core::env::number("SPEARV_PYTHON_WORKERS", 4).clamp(1, 32);
+        let stacks = std::thread::available_parallelism()
+            .map_or(4, usize::from)
+            .min(workers)
+            .max(1);
         let tile = TileState {
             pending: 0,
             active: 0,
@@ -1961,8 +1967,11 @@ fn job_bytes(width: u32, height: u32) -> u64 {
     let pixels = u64::from(width) * u64::from(height);
     let detector = pixels.min(MAX_NATIVE_PIXELS as u64);
     let reads = spearv_core::env::number("SPEARV_MOSAIC_READS", READS as u64).max(1);
-    let stacks = std::thread::available_parallelism().map_or(4, |cores| cores.get() as u64);
     let workers = spearv_core::env::number("SPEARV_PYTHON_WORKERS", 4_u64).clamp(1, 32);
+    let stacks = std::thread::available_parallelism()
+        .map_or(4, |cores| cores.get() as u64)
+        .min(workers)
+        .max(1);
     let cutouts = (reads + stacks) * detector * 16;
     let natives = stacks * detector * 19;
     let tile = pixels.min(u64::from(TILE) * u64::from(TILE));
