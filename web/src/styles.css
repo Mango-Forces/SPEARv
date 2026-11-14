@@ -233,8 +233,9 @@ summary:focus-visible {
   width: 4.2rem;
 }
 
-.release select {
+.topbar .release select {
   box-sizing: border-box;
+  flex: 0 0 10.5rem;
   width: 10.5rem;
   min-width: 10.5rem;
   max-width: 10.5rem;
@@ -249,7 +250,7 @@ summary:focus-visible {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
-  overflow: hidden;
+  overflow: hidden !important;
   text-overflow: ellipsis;
   white-space: nowrap;
   background-color: var(--sunken);
@@ -710,7 +711,8 @@ figcaption .delta-legend {
     width: 7.5rem;
   }
 
-  .release select {
+  .topbar .release select {
+    flex-basis: 9.5rem;
     width: 9.5rem;
     min-width: 9.5rem;
     max-width: 9.5rem;
