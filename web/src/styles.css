@@ -17,10 +17,10 @@
   --text: #e8eaec;
   --text-2: #a7adb3;
   --text-3: #7d848b;
-  /* NASA identity palette on trial: red primary, blue secondary. */
-  --accent: #e4002b;
+  /* NASA identity palette on trial: blue primary, red for Stop. */
+  --accent: #0032a0;
   --accent-ink: #ffffff;
-  --accent-blue: #0032a0;
+  --accent-red: #e4002b;
   --danger: #e4002b;
   --warn: #d9b779;
   --sans: "Google Sans", "Product Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
@@ -260,16 +260,16 @@ summary:focus-visible {
 
 .topbar .show:hover:not(:disabled),
 .location .fov-chain[aria-pressed="true"]:hover:not(:disabled) {
-  border-color: #ff1a45;
-  background: #ff1a45;
+  border-color: #1a4fd4;
+  background: #1a4fd4;
   color: var(--accent-ink);
 }
 
-/* Stop is its own action, not a hover state of Find. NASA blue while running. */
+/* Stop is its own action, not a hover state of Find. NASA red while running. */
 .topbar .show--stop,
 .topbar .show--stop:hover:not(:disabled) {
-  border-color: var(--accent-blue);
-  background: var(--accent-blue);
+  border-color: var(--accent-red);
+  background: var(--accent-red);
   color: #ffffff;
 }
 
