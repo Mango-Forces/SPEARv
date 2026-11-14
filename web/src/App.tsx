@@ -33,7 +33,7 @@ import {
 
 type VisitRow = { index: number; mjd: number; mjd_end: number; exposures: number }
 type DataDrawer = "layers" | "spectrum"
-const SHARE_TONGUE_OFFSET = 88
+const EXTRAS_TONGUE_OFFSET = 88
 type RawControlsState = {
   state: RawSessionState
   metadata: RawMetadata | null
@@ -643,7 +643,7 @@ function ValidViewApp({ view }: { view: View }) {
           layout="overlay"
           open={dataOpen}
           tabRef={extrasTabRef}
-          tabOffset={0}
+          tabOffset={EXTRAS_TONGUE_OFFSET}
           onOpenChange={(open) => {
             if (!open) {
               setDataOpen(false)
@@ -749,7 +749,7 @@ function ValidViewApp({ view }: { view: View }) {
           width="drawer"
           layout="overlay"
           open={shareOpen}
-          tabOffset={SHARE_TONGUE_OFFSET}
+          tabOffset={0}
           tabRef={shareTabRef}
           onOpenChange={(open) => {
             if (!open) {
