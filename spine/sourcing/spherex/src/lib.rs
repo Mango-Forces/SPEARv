@@ -274,12 +274,8 @@ struct LayoutCache {
 }
 
 impl LayoutCache {
-    fn get(&self, key: &LayoutKey, need_pages: bool) -> Option<Arc<Layout>> {
-        let layout = self.entries.get(key)?;
-        if need_pages && layout.pages.is_empty() && key.1.is_some() && layout.size > 1024 * 1024 {
-            return None;
-        }
-        Some(Arc::clone(layout))
+    fn get(&self, key: &LayoutKey) -> Option<Arc<Layout>> {
+        self.entries.get(key).map(Arc::clone)
     }
 
     fn insert(&mut self, key: LayoutKey, layout: Arc<Layout>) {
@@ -325,6 +321,7 @@ struct Layout {
     flag_bits: FlagBits,
     size: u64,
     pages: HeaderPages,
+    header_spans: Vec<(u64, u32)>,
     header_bytes: u64,
     header_requests: u64,
 }
@@ -352,6 +349,7 @@ struct LayoutMeta {
     wavelength: WavelengthMap,
     flag_bits: FlagBits,
     pages: HeaderPages,
+    header_spans: Vec<(u64, u32)>,
 }
 
 /// Per-probe request accounting. A range read is counted from the `ReadTrace`
@@ -720,37 +718,41 @@ impl SpherexSource {
     async fn layout(&self, exposure: &Exposure, need_pages: bool) -> Result<Arc<Layout>> {
         let file = self.http(exposure);
         let key = (file.url.clone(), file.etag.clone());
-        if let Some(layout) = self
-            .layouts
-            .lock()
-            .ok()
-            .and_then(|cache| cache.get(&key, need_pages))
-        {
-            return Ok(layout);
-        }
         let disk_path = match (&self.cache_dir, &file.etag, file.size_hint) {
             (Some(dir), Some(etag), Some(size)) if size > 1024 * 1024 => {
                 Some(disk_layout_path(dir, &file.url, etag, size))
             }
             _ => None,
         };
-        if let Some(path) = &disk_path {
-            if let Some(layout) = load_disk_layout(path) {
-                let layout = Arc::new(layout);
-                if let Ok(mut cache) = self.layouts.lock() {
-                    cache.insert(key, Arc::clone(&layout));
-                }
-                return Ok(layout);
+        let cached = self
+            .layouts
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&key));
+        let layout = if let Some(layout) = cached {
+            layout
+        } else if let Some(layout) = disk_path.as_deref().and_then(load_disk_layout) {
+            let layout = Arc::new(layout);
+            if let Ok(mut cache) = self.layouts.lock() {
+                cache.insert(key.clone(), Arc::clone(&layout));
             }
+            layout
+        } else {
+            let layout = self.build_layout(file.clone()).await?;
+            if let Some(path) = &disk_path {
+                save_disk_layout(path, &layout);
+            }
+            if let Ok(mut cache) = self.layouts.lock() {
+                cache.insert(key.clone(), Arc::new(layout.cached()));
+            }
+            Arc::new(layout)
+        };
+        if need_pages && layout.pages.is_empty() && layout.size > 64 * 1024 {
+            return self
+                .populate_header_pages(&file, &key, disk_path.as_deref(), &layout)
+                .await;
         }
-        let layout = self.build_layout(file).await?;
-        if let Some(path) = &disk_path {
-            save_disk_layout(path, &layout);
-        }
-        if let Ok(mut cache) = self.layouts.lock() {
-            cache.insert(key, Arc::new(layout.cached()));
-        }
-        Ok(Arc::new(layout))
+        Ok(layout)
     }
 
     async fn build_layout(&self, file: HttpFile) -> Result<Layout> {
@@ -769,10 +771,16 @@ impl SpherexSource {
         .await
         .map_err(fits_error)?;
         let meta = completed.value;
-        let pages = if file.etag.is_some() && size > 1024 * 1024 {
+        let cache_pages = file.etag.is_some() && size > 1024 * 1024;
+        let pages = if cache_pages {
             meta.pages
         } else {
             Arc::from([])
+        };
+        let header_spans = if cache_pages {
+            meta.header_spans
+        } else {
+            Vec::new()
         };
         Ok(Layout {
             wcs: meta.wcs,
@@ -780,9 +788,124 @@ impl SpherexSource {
             flag_bits: meta.flag_bits,
             size,
             pages,
+            header_spans,
             header_bytes: completed.io.transferred_bytes + probe_bytes,
             header_requests: completed.io.attempts + probe_requests,
         })
+    }
+
+    async fn populate_header_pages(
+        &self,
+        file: &HttpFile,
+        key: &LayoutKey,
+        disk_path: Option<&Path>,
+        layout: &Layout,
+    ) -> Result<Arc<Layout>> {
+        let (pages, header_spans, fetched_bytes, fetched_requests) =
+            if !layout.header_spans.is_empty() {
+                let pinned = file.clone().pinned(layout.size);
+                let cancel = Cancellation::default();
+                let mut join = tokio::task::JoinSet::new();
+                for (index, &(offset, len)) in layout.header_spans.iter().enumerate() {
+                    let pinned = pinned.clone();
+                    let cancel = cancel.clone();
+                    join.spawn(async move {
+                        let trace = ReadTrace::default();
+                        let bytes = pinned
+                            .read_at(offset, len as usize, &cancel, &trace)
+                            .await
+                            .map_err(fits_error)?;
+                        Ok::<_, Error>((
+                            index,
+                            offset,
+                            Arc::<[u8]>::from(bytes),
+                            trace.bytes(),
+                            trace.attempts(),
+                        ))
+                    });
+                }
+                let mut results = Vec::with_capacity(layout.header_spans.len());
+                while let Some(joined) = join.join_next().await {
+                    let item = match joined {
+                        Ok(Ok(item)) => item,
+                        Ok(Err(error)) => {
+                            cancel.cancel();
+                            return Err(error);
+                        }
+                        Err(_) => {
+                            cancel.cancel();
+                            return Err(Error::Message("SPHEREx header fetch task failed".into()));
+                        }
+                    };
+                    results.push(item);
+                }
+                results.sort_unstable_by_key(|(index, _, _, _, _)| *index);
+                let mut total_bytes = 0u64;
+                let mut total_requests = 0u64;
+                let pages = results
+                    .into_iter()
+                    .map(|(_, offset, bytes, read_bytes, attempts)| {
+                        total_bytes += read_bytes;
+                        total_requests += attempts;
+                        (offset, bytes)
+                    })
+                    .collect::<Vec<_>>();
+                (
+                    HeaderPages::from(pages),
+                    layout.header_spans.clone(),
+                    total_bytes,
+                    total_requests,
+                )
+            } else {
+                let size = layout.size;
+                let cancel = Cancellation::default();
+                let reader: Arc<dyn ReadAt> = Arc::new(file.clone().pinned(size));
+                let completed = spearv_fits::run(
+                    Input::Random { size, reader },
+                    FitsBudget::new(LAYOUT_BUDGET),
+                    layout_limits(),
+                    cancel,
+                    move |fits| {
+                        fits.move_named("IMAGE", 0)?;
+                        fits.move_named("FLAGS", 0)?;
+                        fits.move_named("VARIANCE", 0)?;
+                        fits.move_named("ZODI", 0)?;
+                        let pages = fits.cached_pages();
+                        let spans = compact_spans(fits.read_spans(), size);
+                        Ok((pages, spans))
+                    },
+                )
+                .await
+                .map_err(fits_error)?;
+                let (pages, spans) = completed.value;
+                (
+                    pages,
+                    spans,
+                    completed.io.transferred_bytes,
+                    completed.io.attempts,
+                )
+            };
+        let updated = Layout {
+            wcs: layout.wcs.clone(),
+            wavelength: layout.wavelength.clone(),
+            flag_bits: layout.flag_bits,
+            size: layout.size,
+            pages,
+            header_spans,
+            header_bytes: layout.header_bytes + fetched_bytes,
+            header_requests: layout.header_requests + fetched_requests,
+        };
+        if file.etag.is_some() && layout.size > 1024 * 1024 {
+            if layout.header_spans.is_empty() && !updated.header_spans.is_empty() {
+                if let Some(path) = disk_path {
+                    save_disk_layout(path, &updated);
+                }
+            }
+            if let Ok(mut cache) = self.layouts.lock() {
+                cache.insert(key.clone(), Arc::new(updated.cached()));
+            }
+        }
+        Ok(Arc::new(updated))
     }
 }
 
@@ -832,6 +955,28 @@ fn cutout_limits(page_bytes: usize) -> Limits {
     }
 }
 
+fn compact_spans(spans: Vec<(u64, u64)>, size: u64) -> Vec<(u64, u32)> {
+    if spans.is_empty() || spans.len() > 16 {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(spans.len());
+    let mut total = 0u64;
+    for (offset, len) in spans {
+        let Ok(len32) = u32::try_from(len) else {
+            return Vec::new();
+        };
+        if len32 == 0 || offset.checked_add(len).is_none_or(|end| end > size) {
+            return Vec::new();
+        }
+        total += len;
+        if total > 512 * 1024 {
+            return Vec::new();
+        }
+        out.push((offset, len32));
+    }
+    out
+}
+
 fn layout_meta(fits: &mut Fits) -> spearv_fits::Result<LayoutMeta> {
     fits.move_named("IMAGE", 0)?;
     let info = fits.image_info()?;
@@ -843,12 +988,14 @@ fn layout_meta(fits: &mut Fits) -> spearv_fits::Result<LayoutMeta> {
     fits.move_named("VARIANCE", 0)?;
     fits.move_named("ZODI", 0)?;
     let pages = fits.cached_pages();
+    let header_spans = compact_spans(fits.read_spans(), u64::MAX);
     let wavelength = read_wavelength(fits, &cards)?;
     Ok(LayoutMeta {
         wcs,
         wavelength,
         flag_bits,
         pages,
+        header_spans,
     })
 }
 
@@ -858,6 +1005,8 @@ struct DiskMeta {
     wavelength: WavelengthMap,
     flag_bits: FlagBits,
     size: u64,
+    #[serde(default)]
+    header_spans: Vec<(u64, u32)>,
 }
 
 fn disk_layout_path(dir: &Path, url: &str, etag: &str, size: u64) -> PathBuf {
@@ -893,12 +1042,20 @@ fn load_disk_layout(path: &Path) -> Option<Layout> {
     if at != bytes.len() {
         return None;
     }
+    let header_spans = compact_spans(
+        meta.header_spans
+            .into_iter()
+            .map(|(offset, len)| (offset, u64::from(len)))
+            .collect(),
+        meta.size,
+    );
     Some(Layout {
         wcs: meta.wcs,
         wavelength: meta.wavelength,
         flag_bits: meta.flag_bits,
         size: meta.size,
         pages: pages.into(),
+        header_spans,
         header_bytes: 0,
         header_requests: 0,
     })
@@ -914,6 +1071,7 @@ fn save_disk_layout(path: &Path, layout: &Layout) {
         wavelength: layout.wavelength.clone(),
         flag_bits: layout.flag_bits,
         size: layout.size,
+        header_spans: layout.header_spans.clone(),
     };
     let Ok(meta_bytes) = serde_json::to_vec(&meta) else { return };
     let Ok(meta_len) = u32::try_from(meta_bytes.len()) else { return };
@@ -1177,8 +1335,9 @@ impl SpherexSource {
         let row_bytes = u64::from(layout.wcs.naxis[0].max(1) as u32) * 4;
         let page_bytes = row_bytes
             .saturating_mul(window.height)
-            .saturating_add(65_536)
+            .saturating_add(5_760)
             .clamp(64 * 1024, 16 * 1024 * 1024) as usize;
+        let header_page_bytes = (64 * 1024).min(page_bytes);
         let reader: Arc<dyn ReadAt> =
             Arc::new(file.pinned_with(layout.size, Arc::clone(&layout.pages)));
         let budget = FitsBudget::new(CUTOUT_BUDGET);
@@ -1195,7 +1354,9 @@ impl SpherexSource {
                     limits,
                     Cancellation::default(),
                     move |fits| {
+                        fits.set_read_page_bytes(header_page_bytes)?;
                         fits.move_named(name, 0)?;
+                        fits.set_read_page_bytes(page_bytes)?;
                         let values = fits.read_f32(window, FloatMode::Automatic)?;
                         Ok(plane(window, values.values()))
                     },
@@ -1215,7 +1376,9 @@ impl SpherexSource {
                     limits,
                     Cancellation::default(),
                     move |fits| {
+                        fits.set_read_page_bytes(header_page_bytes)?;
                         fits.move_named("FLAGS", 0)?;
+                        fits.set_read_page_bytes(page_bytes)?;
                         let flags = fits.read_flags(window)?;
                         let valid = flags
                             .valid()
@@ -1741,5 +1904,258 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, spearv_fits::Error::Cancelled));
+    }
+
+    fn large_picture_hdu(
+        name: &str,
+        bitpix: i32,
+        width: usize,
+        height: usize,
+        extra: &[String],
+        data: Vec<u8>,
+    ) -> Vec<u8> {
+        let mut cards = vec![
+            card("XTENSION= 'IMAGE   '"),
+            card(&format!("BITPIX  = {bitpix:>20}")),
+            card("NAXIS   =                    2"),
+            card(&format!("NAXIS1  = {width:>20}")),
+            card(&format!("NAXIS2  = {height:>20}")),
+            card("PCOUNT  =                    0"),
+            card("GCOUNT  =                    1"),
+            card(&format!("EXTNAME = '{name}'")),
+        ];
+        cards.extend(extra.iter().cloned());
+        cards.push(card("END"));
+        let mut out = block(&cards);
+        out.extend(data);
+        while !out.len().is_multiple_of(2880) {
+            out.push(0);
+        }
+        out
+    }
+
+    fn large_synthetic_fits(width: usize, height: usize) -> Vec<u8> {
+        let primary = block(&[
+            card("SIMPLE  =                    T"),
+            card("BITPIX  =                    8"),
+            card("NAXIS   =                    0"),
+            card("EXTEND  =                    T"),
+            card("END"),
+        ]);
+        let pixels = width * height;
+        let mut file = primary;
+        let mut image = Vec::with_capacity(pixels * 4);
+        for row in 0..height {
+            let val = (row as f32).to_be_bytes();
+            for _ in 0..width {
+                image.extend_from_slice(&val);
+            }
+        }
+        file.extend(large_picture_hdu(
+            "IMAGE",
+            -32,
+            width,
+            height,
+            &image_cards(),
+            image,
+        ));
+        let mut variance = Vec::with_capacity(pixels * 4);
+        let var_bytes = 0.25_f32.to_be_bytes();
+        for _ in 0..pixels {
+            variance.extend_from_slice(&var_bytes);
+        }
+        file.extend(large_picture_hdu("VARIANCE", -32, width, height, &[], variance));
+        let mut zodi = Vec::with_capacity(pixels * 4);
+        let zodi_bytes = 0.5_f32.to_be_bytes();
+        for _ in 0..pixels {
+            zodi.extend_from_slice(&zodi_bytes);
+        }
+        file.extend(large_picture_hdu("ZODI", -32, width, height, &[], zodi));
+        let mut flags = Vec::with_capacity(pixels * 4);
+        let flag_bytes = 4_i32.to_be_bytes();
+        for _ in 0..pixels {
+            flags.extend_from_slice(&flag_bytes);
+        }
+        file.extend(large_picture_hdu(
+            "FLAGS",
+            32,
+            width,
+            height,
+            &[card("BLANK   =            -2147483648")],
+            flags,
+        ));
+        file.extend(wave_table_hdu());
+        file
+    }
+
+    fn test_row(url: &str, etag: &str, size: u64, width: i32, height: i32) -> spearv_index::ExposureRow {
+        spearv_index::ExposureRow {
+            key: "file.fits".into(),
+            url: url.into(),
+            etag: Some(etag.into()),
+            size: Some(size as i64),
+            release: "qr3".into(),
+            survey: spearv_index::Survey::AllSky,
+            sps_flags: None,
+            period: "2025W34".into(),
+            version: "v1".into(),
+            obsid: "o1".into(),
+            detector: 1,
+            mjd_beg: None,
+            mjd_avg: 60_000.0,
+            em_min_um: 0.75,
+            em_max_um: 1.1,
+            wcs: Wcs {
+                crpix: [2.0, 2.0],
+                crval: [10.0, 20.0],
+                cd: [[-0.001, 0.0], [0.0, 0.001]],
+                sip: spearv_core::Sip {
+                    a: spearv_core::Poly::new(0),
+                    b: spearv_core::Poly::new(0),
+                    ap: None,
+                    bp: None,
+                },
+                naxis: [width, height],
+            },
+            quality: spearv_index::Quality::default(),
+            sc_xyz: None,
+        }
+    }
+
+    fn source_with_cache(dir: PathBuf) -> SpherexSource {
+        SpherexSource {
+            client: http_client().unwrap(),
+            index: None,
+            cache_dir: Some(dir),
+            stats: Arc::new(Stats::default()),
+            layouts: Mutex::new(LayoutCache::default()),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cold_disk_layouts_keep_cutout_transfer_near_planned_bytes() {
+        let width = 2040usize;
+        let height = 512usize;
+        let file = large_synthetic_fits(width, height);
+        let size = file.len() as u64;
+        assert!(size > 10 * 1024 * 1024);
+        let (url, seen) = serve(file, "\"v1\"").await;
+        let row = test_row(&url, "\"v1\"", size, width as i32, height as i32);
+        let window = PixelWindow {
+            x0: 0,
+            y0: 128,
+            width: width as i32,
+            height: 256,
+            clipped: false,
+        };
+        let planned = (window.height as u64) * (width as u64) * 16;
+
+        let cache_dir = std::env::temp_dir().join(format!(
+            "spearv-spherex-layout-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let disk_path = disk_layout_path(&cache_dir, &url, "\"v1\"", size);
+
+        // 1. Cold build_layout + warm memory cutout.
+        let s1 = source_with_cache(cache_dir.clone());
+        let geom = s1.exact_geometry(&row).await.unwrap();
+        assert!(geom.header_bytes > 0);
+        let disk_size = std::fs::metadata(&disk_path).unwrap().len();
+        assert!(
+            disk_size < 8192,
+            "disk layout must stay small metadata only, got {disk_size} bytes"
+        );
+        let warm = s1.exact_window_cutout(&row, &window).await.unwrap();
+        assert_eq!(warm.image.data[0], 128.0);
+        assert_eq!(warm.image.data[warm.image.data.len() - 1], 383.0);
+        assert_eq!(warm.variance.data[0], 0.25);
+        assert_eq!(warm.zodi.as_ref().unwrap().data[0], 0.5);
+        assert_eq!(warm.flags.data[0], 4);
+        assert!(
+            warm.bytes_read <= planned + 64 * 1024,
+            "warm cutout read {} vs planned {}",
+            warm.bytes_read,
+            planned
+        );
+        assert_eq!(warm.s3_requests, 4);
+
+        // 2. Cold disk layout with header_spans on a fresh SpherexSource.
+        seen.lock().unwrap().clear();
+        let s2 = source_with_cache(cache_dir.clone());
+        let cold_spans = s2.exact_window_cutout(&row, &window).await.unwrap();
+        assert_eq!(cold_spans.image.data[0], 128.0);
+        assert!(
+            cold_spans.bytes_read <= planned + 128 * 1024,
+            "cold disk layout with header_spans read {} vs planned {}",
+            cold_spans.bytes_read,
+            planned
+        );
+        assert!(cold_spans.s3_requests <= 8);
+
+        // Second cutout on s2 is now warm in memory.
+        let warm2 = s2.exact_window_cutout(&row, &window).await.unwrap();
+        assert_eq!(warm2.s3_requests, 4);
+        assert!(warm2.bytes_read <= planned + 64 * 1024);
+
+        // 3. Metadata-only disk layout without header_spans.
+        let meta_only_bytes = std::fs::read(&disk_path).unwrap();
+        let meta_len = u32::from_le_bytes(meta_only_bytes[0..4].try_into().unwrap()) as usize;
+        let mut meta_val: serde_json::Value =
+            serde_json::from_slice(&meta_only_bytes[4..4 + meta_len]).unwrap();
+        meta_val.as_object_mut().unwrap().remove("header_spans");
+        let meta_only_json = serde_json::to_vec(&meta_val).unwrap();
+        let mut meta_only_out = Vec::new();
+        meta_only_out.extend_from_slice(&(meta_only_json.len() as u32).to_le_bytes());
+        meta_only_out.extend_from_slice(&meta_only_json);
+        meta_only_out.extend_from_slice(&0u32.to_le_bytes());
+        std::fs::write(&disk_path, meta_only_out).unwrap();
+
+        seen.lock().unwrap().clear();
+        let s3 = source_with_cache(cache_dir.clone());
+        let cold_meta_only = s3.exact_window_cutout(&row, &window).await.unwrap();
+        assert_eq!(cold_meta_only.image.data[0], 128.0);
+        assert!(
+            cold_meta_only.bytes_read <= planned + 512 * 1024,
+            "cold metadata-only disk layout read {} vs planned {} (overhead {})",
+            cold_meta_only.bytes_read,
+            planned,
+            cold_meta_only.bytes_read.saturating_sub(planned)
+        );
+        assert!(cold_meta_only.s3_requests <= 12);
+
+        eprintln!(
+            "MEASURE planned={} warm={} ({:.4}x, req={}) cold_spans={} ({:.4}x, req={}) cold_meta_only={} ({:.4}x, req={}) disk_bytes={}",
+            planned,
+            warm.bytes_read,
+            warm.bytes_read as f64 / planned as f64,
+            warm.s3_requests,
+            cold_spans.bytes_read,
+            cold_spans.bytes_read as f64 / planned as f64,
+            cold_spans.s3_requests,
+            cold_meta_only.bytes_read,
+            cold_meta_only.bytes_read as f64 / planned as f64,
+            cold_meta_only.s3_requests,
+            disk_size
+        );
+
+        // Metadata-only file was upgraded with header_spans on disk.
+        let reloaded = load_disk_layout(&disk_path).unwrap();
+        assert!(!reloaded.header_spans.is_empty());
+
+        // 4. Stale ETag during populate_header_pages returns ContentChanged.
+        let stale_row = test_row(&url, "\"v2\"", size, width as i32, height as i32);
+        let stale_disk = disk_layout_path(&cache_dir, &url, "\"v2\"", size);
+        let mut stale_layout = reloaded;
+        stale_layout.pages = Arc::from([]);
+        save_disk_layout(&stale_disk, &stale_layout);
+        let s4 = source_with_cache(cache_dir.clone());
+        let err = s4.exact_window_cutout(&stale_row, &window).await.unwrap_err();
+        assert!(err.to_string().contains("changed"), "{err}");
+
+        let _ = std::fs::remove_dir_all(&cache_dir);
     }
 }

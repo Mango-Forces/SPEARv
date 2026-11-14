@@ -1057,6 +1057,17 @@ impl Fits {
             .as_ref()
             .map_or_else(|| std::sync::Arc::from([]), |context| context.pages())
     }
+    pub fn set_read_page_bytes(&mut self, page_bytes: usize) -> Result<()> {
+        if let Some(context) = &self.context {
+            context.set_page_bytes(page_bytes)?;
+        }
+        Ok(())
+    }
+    pub fn read_spans(&self) -> Vec<(u64, u64)> {
+        self.context
+            .as_ref()
+            .map_or_else(Vec::new, |context| context.spans())
+    }
 }
 impl Drop for Fits {
     fn drop(&mut self) {

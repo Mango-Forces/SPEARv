@@ -104,6 +104,12 @@ impl ReadTrace {
     pub fn received(&self, bytes: usize) {
         self.bytes.fetch_add(bytes as u64, Ordering::Relaxed);
     }
+    pub fn attempts(&self) -> u64 {
+        self.attempts.load(Ordering::Relaxed)
+    }
+    pub fn bytes(&self) -> u64 {
+        self.bytes.load(Ordering::Relaxed)
+    }
 }
 /// Reader pins logical size. Condition content when a validator is available;
 /// unconditioned reads stay job-local and must not claim exact content
@@ -141,7 +147,9 @@ pub struct IoStats {
 }
 struct Cursor {
     position: u64,
+    page_bytes: usize,
     pages: VecDeque<(u64, Arc<[u8]>, bool)>,
+    spans: Vec<(u64, u64)>,
     stats: IoStats,
 }
 pub(crate) struct Context {
@@ -150,7 +158,7 @@ pub(crate) struct Context {
     reader: Arc<dyn ReadAt>,
     runtime: Handle,
     pub cancel: Cancellation,
-    page_bytes: usize,
+    max_page_bytes: usize,
     cache_bytes: usize,
     cursor: Mutex<Cursor>,
     cause: Mutex<Option<Error>>,
@@ -200,11 +208,13 @@ impl Context {
             reader,
             runtime,
             cancel,
-            page_bytes,
+            max_page_bytes: page_bytes,
             cache_bytes,
             cursor: Mutex::new(Cursor {
                 position: 0,
+                page_bytes,
                 pages,
+                spans: Vec::new(),
                 stats: IoStats {
                     resident_bytes,
                     peak_resident_bytes: resident_bytes,
@@ -261,6 +271,41 @@ impl Context {
             .collect::<Vec<_>>()
             .into()
     }
+    pub fn set_page_bytes(&self, page_bytes: usize) -> Result<()> {
+        if page_bytes == 0 || page_bytes > self.max_page_bytes {
+            return Err(Error::Bounds(
+                "page_bytes exceeds admitted limit".into(),
+            ));
+        }
+        self.cursor
+            .lock()
+            .map_err(|_| Error::CallbackPanic)?
+            .page_bytes = page_bytes;
+        Ok(())
+    }
+    pub fn spans(&self) -> Vec<(u64, u64)> {
+        let mut spans = self
+            .cursor
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .spans
+            .clone();
+        spans.sort_unstable_by_key(|(start, _)| *start);
+        let mut merged: Vec<(u64, u64)> = Vec::with_capacity(spans.len());
+        for (start, end) in spans {
+            if let Some(last) = merged.last_mut() {
+                if start <= last.1 {
+                    last.1 = last.1.max(end);
+                    continue;
+                }
+            }
+            merged.push((start, end));
+        }
+        merged
+            .into_iter()
+            .map(|(start, end)| (start, end - start))
+            .collect()
+    }
     pub fn take_cause(&self) -> Option<Error> {
         self.cause.lock().unwrap_or_else(|p| p.into_inner()).take()
     }
@@ -300,7 +345,7 @@ impl Context {
                         .filter(|offset| *offset > start)
                         .min()
                         .unwrap_or(self.size);
-                    let len = (next - start).min(self.page_bytes as u64) as usize;
+                    let len = (next - start).min(cursor.page_bytes as u64) as usize;
                     while cursor.stats.resident_bytes + len > self.cache_bytes {
                         let victim = cursor
                             .pages
@@ -324,7 +369,7 @@ impl Context {
                         return Err(Error::ShortRead);
                     }
                     // A reader returning an oversized allocation cannot bypass the cache charge.
-                    if bytes.capacity() > self.page_bytes {
+                    if bytes.capacity() > self.max_page_bytes {
                         return Err(Error::Bounds(
                             "reader allocation exceeds admitted page capacity".into(),
                         ));
@@ -354,10 +399,25 @@ impl Context {
             let offset = (cursor.position - start) as usize;
             let n = (output.len() - copied).min(page.len() - offset);
             output[copied..copied + n].copy_from_slice(&page[offset..offset + n]);
-            cursor.position += n as u64;
+            let read_start = cursor.position;
+            let read_end = read_start + n as u64;
+            record_span(&mut cursor.spans, read_start, read_end);
+            cursor.position = read_end;
             copied += n;
         }
         Ok(())
+    }
+}
+fn record_span(spans: &mut Vec<(u64, u64)>, start: u64, end: u64) {
+    for span in spans.iter_mut() {
+        if start <= span.1 && end >= span.0 {
+            span.0 = span.0.min(start);
+            span.1 = span.1.max(end);
+            return;
+        }
+    }
+    if spans.len() < 64 {
+        spans.push((start, end));
     }
 }
 fn callback(id: i32, work: impl FnOnce(&Context) -> Result<()>) -> c_int {

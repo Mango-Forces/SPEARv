@@ -717,3 +717,40 @@ async fn operation_panic_after_native_open_closes_backing_and_releases_charges()
     assert_eq!(token.io_stats().closes, 1);
     assert_eq!(budget.used_bytes(), 0);
 }
+
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn set_read_page_bytes_and_read_spans_track_actual_reads() {
+    let path = common::fixture();
+    let size = std::fs::metadata(&path).expect("size").len();
+    let server = Server::start(path, Fault::None);
+    let budget = Budget::new(32 * 1024 * 1024);
+    let completed = run(
+        Input::Random {
+            size,
+            reader: server.reader(size, Fault::None),
+        },
+        budget,
+        common::limits(),
+        Cancellation::default(),
+        |fits| {
+            assert!(matches!(fits.set_read_page_bytes(0), Err(Error::Bounds(_))));
+            assert!(matches!(
+                fits.set_read_page_bytes(common::limits().page_bytes + 1),
+                Err(Error::Bounds(_))
+            ));
+            fits.set_read_page_bytes(2880)?;
+            fits.move_named("SIGNED", 0)?;
+            let header_spans = fits.read_spans();
+            assert!(!header_spans.is_empty());
+            assert!(header_spans.iter().all(|(_, len)| *len > 0));
+            fits.set_read_page_bytes(common::limits().page_bytes)?;
+            let values = fits.read_flags(common::window())?;
+            Ok((values.values().to_vec(), fits.read_spans()))
+        },
+    )
+    .await
+    .expect("range read");
+    assert!(!completed.value.0.is_empty());
+    assert!(!completed.value.1.is_empty());
+}
