@@ -1,0 +1,18 @@
+[Unit]
+Description=Rebuild the SPEARv engine when mango-spearv source changes
+
+[Service]
+WorkingDirectory=%h/mango-spearv
+Environment=PATH=%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+Environment=CARGO_HOME=/home/ubuntu/mango-spearv/.build/cargo-home
+Environment=CARGO_TARGET_DIR=/home/ubuntu/mango-spearv/.build/target-mango
+Environment=CARGO_NET_OFFLINE=true
+Environment=SPEARV_CFITSIO_PREFIX=/home/ubuntu/mango-spearv/.build/native/cfitsio-4.7.0-prefix
+Environment=SPEARV_PYTHON_PREFIX=/home/ubuntu/mango-spearv/.build/runtime/install/opt/spearv/python
+Environment=PYO3_PYTHON=/home/ubuntu/mv-flux-data/venv/bin/python
+ExecStart=/usr/bin/env watchexec --watch spine --exts rs,toml --ignore spine/target --on-busy-update restart --postpone -- %h/mango-spearv/tools/rebuild-engine.sh
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

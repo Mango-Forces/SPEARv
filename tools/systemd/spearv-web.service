@@ -1,0 +1,14 @@
+[Unit]
+Description=SPEARv web app (Vite)
+After=spearv-engine.service
+
+[Service]
+WorkingDirectory=%h/mango-spearv/web
+EnvironmentFile=%h/.config/spearv/web.env
+Environment=PATH=%h/.nvm/versions/node/v24.22.2/bin:/usr/bin:/bin
+ExecStart=%h/.nvm/versions/node/v24.22.2/bin/npx vite
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
