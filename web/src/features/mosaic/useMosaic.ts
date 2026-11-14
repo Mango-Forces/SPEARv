@@ -35,6 +35,8 @@ export type MosaicState = {
   error?: string
   /** Stop was pressed; the engine cancel has not finished yet. */
   stopping?: boolean
+  /** Armed run has started; waiting for the first engine response. */
+  starting?: boolean
   /** Stop the job on this page and on the engine, leaving nothing running. */
   stop: () => void
   /** Run this view again under a fresh job, without a second Find click. */
@@ -121,12 +123,12 @@ export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS,
       setState(IDLE)
       return
     }
-    setState(IDLE)
+    setState({ ...IDLE, starting: true })
     const ac = new AbortController()
     control.current.ac = ac
     control.current.jobId = undefined
     const update = (next: Partial<MosaicState>) => {
-      if (!ac.signal.aborted) setState((state) => ({ ...state, ...next }))
+      if (!ac.signal.aborted) setState((state) => ({ ...state, starting: false, ...next }))
     }
     const pin = pinKey ? pinKey.split("&") : []
     const query = {
@@ -743,7 +745,7 @@ export function statusText(state: MosaicState): string {
   if (state.stopping) return "Stopping"
   if (state.error) return "failed"
   if (state.reconnecting) return "Engine restarting, resuming shortly"
-  if (!status) return "Starting mosaic"
+  if (state.starting || !status) return "Starting mosaic"
   const seconds = `${Math.round(status.elapsed_ms / 1000)} s`
   const size = gigabytes(status.bytes_read)
   const channels = channelText(status)
@@ -783,7 +785,7 @@ export function warningText(state: MosaicState): string | undefined {
 /** True while the page still owns an in-flight or stopping engine job. Find
  * must stay Stop for this whole window, not only while tiles are painting. */
 export function isBusy(state: MosaicState): boolean {
-  if (state.stopping || state.reconnecting) return true
+  if (state.stopping || state.reconnecting || state.starting) return true
   if (state.error) return false
   const phase = state.status?.state
   if (phase === "failed" || phase === "cancelled") return false
@@ -791,6 +793,8 @@ export function isBusy(state: MosaicState): boolean {
   // engine job is done then; keepalive only. Composite stays busy until tiles land.
   if (state.final && phase === "done") return false
   if (state.final && !phase) return false
+  // True idle after stop or before arming: no phase and no canvas.
+  if (!phase && !state.mosaic) return false
   return true
 }
 
