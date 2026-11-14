@@ -17,8 +17,8 @@ describe("band filters", () => {
   })
 
   it("preserves UTC milliseconds and open ends in applied bounds", () => {
-    assert.deepEqual(parseBounds({ fromUtc: "12 Nov 2026, 14:30 UTC", toUtc: "", releases: ["qr2", "qr3"], bands: "1-8;44" }), {
-      fromUtc: "2026-11-12T14:30:00.000Z", toUtc: null, releases: ["qr2", "qr3"], bands: [1, 2, 3, 4, 5, 6, 7, 8, 44],
+    assert.deepEqual(parseBounds({ fromUtc: "12 Nov 2026, 14:30 UTC", toUtc: "", releases: ["qr2", "qr3", "dr1"], bands: "1-8;44" }), {
+      fromUtc: "2026-11-12T14:30:00.000Z", toUtc: null, releases: ["dr1", "qr2", "qr3"], bands: [1, 2, 3, 4, 5, 6, 7, 8, 44],
     })
   })
 })

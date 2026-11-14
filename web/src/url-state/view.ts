@@ -1,7 +1,7 @@
 import { readDisplay, writeDisplay, displayOf, type DisplayState } from "./display.ts"
 import type { Bounds } from "../features/specific/bounds.ts"
 import { DEFAULT_COLOUR_BANDS, type ColourConfigValue } from "./colour.ts"
-import { parseBands, parseUtc } from "../features/specific/bounds.ts"
+import { isReleaseId, parseBands, parseUtc } from "../features/specific/bounds.ts"
 import { DEFAULT_BOUNDS, isDefaultBounds, specificBoundsParams } from "../features/specific/link.ts"
 import { MAX_FOV, formatNumber } from "./position.ts"
 
@@ -167,7 +167,7 @@ function readBounds(params: URLSearchParams, errors: string[]): Bounds | undefin
     toUtc: readParameter(params, "to_utc", null, parseUtc, errors),
     releases: readParameter(params, "releases", DEFAULT_BOUNDS.releases, (value) => {
       const releases = value.split(",")
-      if (releases.some((release) => release !== "qr2" && release !== "qr3")) throw new Error("Use qr2, qr3, or qr2,qr3.")
+      if (releases.some((release) => !isReleaseId(release))) throw new Error("Use qr2, qr3, dr1, or a comma list of those.")
       return [...new Set(releases)].sort()
     }, errors),
     bands: readParameter(params, "bands", DEFAULT_BOUNDS.bands, parseBands, errors),

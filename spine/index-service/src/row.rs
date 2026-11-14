@@ -18,7 +18,7 @@ pub(crate) struct ParsedKey {
     pub(crate) obsid: String,
 }
 
-/// `qrN/level2/<period>/<version>/<detector>/level2_<obsid>D<detector>_spx_<version>.fits`.
+/// `<release>/level2/<period>/<version>/<detector>/level2_<obsid>D<detector>_spx_<version>.fits`.
 /// Anything else in the bucket is not an exposure.
 pub(crate) fn parse_key(key: &str) -> Option<ParsedKey> {
     let parts: Vec<&str> = key.split('/').collect();
@@ -41,9 +41,9 @@ pub(crate) fn parse_key(key: &str) -> Option<ParsedKey> {
     })
 }
 
-/// `qr` and a release number, e.g. `qr2` or `qr3`.
+/// Bucket release folders: `qr2`, `qr3`, `dr1`, and later `qrN` / `drN`.
 pub(crate) fn release_name(name: &str) -> Option<&str> {
-    let digits = name.strip_prefix("qr")?;
+    let digits = name.strip_prefix("qr").or_else(|| name.strip_prefix("dr"))?;
     (!digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())).then_some(name)
 }
 
@@ -147,6 +147,9 @@ mod tests {
         assert!(parse_key(&key("qr3", "P", "v1", 1, 1).replace("_spx_v1", "_spx_v2")).is_none(), "version must match its folder");
         assert!(parse_key(&key("dark", "P", "v1", 1, 1)).is_none());
         assert!(parse_key(&key("qr12", "P", "v1", 1, 1)).is_some());
+        assert_eq!(parse_key(&key("dr1", "2025W17_4B", "l2b-v27-2026-196", 1, 1)).unwrap().release, "dr1");
+        assert!(release_name("dr1").is_some());
+        assert!(release_name("rd1").is_none());
     }
 
     #[test]

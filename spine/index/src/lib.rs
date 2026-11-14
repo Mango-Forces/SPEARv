@@ -1,7 +1,7 @@
 //! The SPHEREx exposure index: the rows the index-service stores and the HTTP API
 //! it answers.
 //!
-//! One table holds every release. `release` (`qr2`, `qr3`, ...) and
+//! One table holds every release. `release` (`qr2`, `qr3`, `dr1`, ...) and
 //! `survey` (`all_sky` or `deep`) are columns, so a new release is new rows and
 //! never a schema change. Callers use the `client` feature; only the
 //! index-service enables `store` and opens the database.
@@ -21,7 +21,7 @@ pub use api::*;
 
 use spearv_core::Wcs;
 
-/// `dr` names a release, e.g. `qr3`, which includes its deep-field exposures.
+/// `dr` names a release, e.g. `qr3` or `dr1`, which includes its deep-field exposures.
 /// A `_deep` suffix, e.g. `qr3_deep`, selects the deep fields alone.
 ///
 /// Every caller that builds a [`CoverageQuery`] from a `dr` value goes through
@@ -215,6 +215,8 @@ mod tests {
         assert_eq!(release_and_survey("qr3"), ("qr3".to_string(), None));
         assert_eq!(release_and_survey("qr2_deep"), ("qr2".to_string(), Some(Survey::Deep)));
         assert_eq!(release_and_survey("qr4"), ("qr4".to_string(), None));
+        assert_eq!(release_and_survey("dr1"), ("dr1".to_string(), None));
+        assert_eq!(release_and_survey("dr1_deep"), ("dr1".to_string(), Some(Survey::Deep)));
     }
 
     #[test]

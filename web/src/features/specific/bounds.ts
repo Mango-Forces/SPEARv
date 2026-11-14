@@ -7,6 +7,11 @@ export type Bounds = {
   bands: number[]
 }
 
+/** Bucket release ids: qr2, qr3, dr1, and later qrN / drN. */
+export function isReleaseId(id: string): boolean {
+  return /^(?:qr|dr)\d+$/.test(id)
+}
+
 export function parseBands(expression: string): number[] {
   const bands = expression.split(";").flatMap((part) => {
     const match = /^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/.exec(part)
@@ -38,8 +43,8 @@ export function parseBounds(draft: { fromUtc: string; toUtc: string; releases: s
   const fromUtc = parseUtc(draft.fromUtc)
   const toUtc = parseUtc(draft.toUtc, "end")
   if (fromUtc && toUtc && fromUtc > toUtc) throw new Error("UTC start must not be after finish.")
-  if (draft.releases.length === 0 || draft.releases.some((release) => release !== "qr2" && release !== "qr3")) {
-    throw new Error("Select QR2, QR3, or both.")
+  if (draft.releases.length === 0 || draft.releases.some((release) => !isReleaseId(release))) {
+    throw new Error("Select DR1, QR2, QR3, or a combination.")
   }
   return { fromUtc, toUtc, releases: [...new Set(draft.releases)].sort(), bands: parseBands(draft.bands) }
 }

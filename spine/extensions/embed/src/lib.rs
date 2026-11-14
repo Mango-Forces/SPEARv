@@ -110,8 +110,8 @@ fn parse_view(raw: &str) -> Result<View> {
     Ok(view)
 }
 
-/// Release ids in the index are `qr2`, `qr3`, `qr3_deep`, and future names in
-/// the same shape. Whitespace, quotes, slashes and HTML are not release ids.
+/// Release ids in the index are `qr2`, `qr3`, `dr1`, `qr3_deep`, and future
+/// names in the same shape. Whitespace, quotes, slashes and HTML are not release ids.
 fn release_ok(release: &str) -> bool {
     !release.is_empty()
         && release.len() <= 32
@@ -314,6 +314,7 @@ mod tests {
     fn release_ids_are_restricted() {
         assert!(release_ok("qr3"));
         assert!(release_ok("qr3_deep"));
+        assert!(release_ok("dr1"));
         assert!(release_ok("qr2-2026"));
         assert!(!release_ok(""));
         assert!(!release_ok("qr3 deep"));

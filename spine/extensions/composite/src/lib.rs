@@ -133,7 +133,7 @@ pub struct RenderQuery {
 #[derive(Serialize, ToSchema)]
 pub struct ReleaseList {
     pub releases: Vec<ReleaseInfo>,
-    /// The release used when `dr` is omitted. QR2 is not mixed with QR3.
+    /// The release used when `dr` is omitted. Releases are never mixed.
     pub default_release: String,
 }
 
@@ -185,18 +185,27 @@ pub struct BandCoverage {
 async fn releases(State(ctx): State<Arc<Context>>) -> Result<Json<ReleaseList>, Error> {
     let source = source(&ctx)?;
     let releases = source.releases().await?;
-    Ok(Json(ReleaseList {
-        releases: releases
-            .into_iter()
-            .map(|release| ReleaseInfo {
-                id: release.id.0,
-                newest_mjd: release.newest_mjd,
-                newest_period: release.newest_period,
-                last_seen_ms: release.last_seen_ms,
-            })
-            .collect(),
-        default_release: "qr3".into(),
-    }))
+    let releases: Vec<ReleaseInfo> = releases
+        .into_iter()
+        .map(|release| ReleaseInfo {
+            id: release.id.0,
+            newest_mjd: release.newest_mjd,
+            newest_period: release.newest_period,
+            last_seen_ms: release.last_seen_ms,
+        })
+        .collect();
+    let default_release = default_release_id(&releases);
+    Ok(Json(ReleaseList { releases, default_release }))
+}
+
+/// Prefer the official data release when indexed, then the newest quick release.
+fn default_release_id(releases: &[ReleaseInfo]) -> String {
+    for id in ["dr1", "qr3", "qr2"] {
+        if releases.iter().any(|release| release.id == id) {
+            return id.into();
+        }
+    }
+    releases.first().map(|release| release.id.clone()).unwrap_or_else(|| "qr3".into())
 }
 
 #[utoipa::path(

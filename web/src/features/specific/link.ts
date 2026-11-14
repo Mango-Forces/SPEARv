@@ -6,7 +6,7 @@ import { formatNumber } from "../../url-state/position.ts"
 export const DEFAULT_BOUNDS: Bounds = {
   fromUtc: null,
   toUtc: null,
-  releases: ["qr2", "qr3"],
+  releases: ["dr1", "qr2", "qr3"],
   bands: Array.from({ length: 102 }, (_, index) => index + 1),
 }
 

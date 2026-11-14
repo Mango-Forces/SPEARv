@@ -104,7 +104,7 @@ describe("bounds roundtrip", () => {
   it("omits default bounds and normalizes explicit defaults", () => {
     assert.equal(viewSearch({ ...BASE, bounds: undefined }).includes("from_utc"), false)
     assert.equal(viewSearch({ ...BASE, bounds: DEFAULT_BOUNDS }).includes("bands"), false)
-    assert.equal(readView("?releases=qr2%2Cqr3&bands=1-102").bounds, undefined)
+    assert.equal(readView("?releases=dr1%2Cqr2%2Cqr3&bands=1-102").bounds, undefined)
     assert.equal(readView("?mode=specific").bounds, undefined)
   })
 
@@ -161,7 +161,8 @@ describe("invalid links surface every bad parameter", () => {
       "bands=0",
       "bands=103",
       "bands=nope",
-      "releases=qr9",
+      "releases=rd1",
+      "releases=nope",
       "releases=",
       "from_utc=not-a-date",
       "from_utc=2024-02-03T04%3A05%3A06.000Z&to_utc=2024-01-02T03%3A04%3A05.000Z",
