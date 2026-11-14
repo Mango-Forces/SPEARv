@@ -1,0 +1,134 @@
+/* Epoch playback: the transport sits between the picture and its caption. */
+.epoch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.epoch-transport {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.epoch-transport button {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+}
+
+.epoch-transport .epoch-play {
+  width: 40px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.epoch-transport .epoch-play:disabled {
+  border-color: var(--line-strong);
+  background: transparent;
+  color: var(--text-3);
+}
+
+.epoch-strip {
+  display: flex;
+  flex: 1 1 240px;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 2px;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.epoch-chip {
+  height: 28px;
+  padding: 0 8px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.epoch-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.epoch-chip[data-state="queued"],
+.epoch-chip[data-state="loading"] {
+  opacity: 0.55;
+}
+
+.epoch-chip[data-state="loading"] {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
+.epoch-chip[data-state="empty"] {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.epoch-chip[data-state="failed"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.epoch-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.epoch-option input[type="range"] {
+  width: 96px;
+}
+
+.epoch-now {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.epoch-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 10px;
+}
+
+.epoch-presets button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.epoch-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.epoch-dates input {
+  width: 100%;
+  min-width: 0;
+}
+
+/* The host fold's summary is the visible title. */
+fieldset.epoch-fieldset > legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

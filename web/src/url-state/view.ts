@@ -40,9 +40,10 @@ export type View = {
   movers: boolean
   /** False-colour three-band render instead of the selected mode. */
   color: boolean
-  /** Applied Specific bounds. `undefined` means the default all-bounds value.
-   * Stored across mode changes so a Show/mode/layer commit never drops the
-   * applied table bounds; only Specific queries use them. */
+  /** Applied Specific bounds: the bands stacked per epoch and the UTC window
+   * its visits come from. `undefined` means the default all-bounds value.
+   * Stored across mode changes so a Find/mode/layer commit never drops them;
+   * only Specific queries use them. */
   bounds?: Bounds
   /** Custom false-colour recipe in API numbering (0..101). `undefined` means
    * the server defaults (red 91, green 41, blue 6, width 5 each in UI

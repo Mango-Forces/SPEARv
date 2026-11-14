@@ -18,6 +18,10 @@ import { SharePanel } from "./features/share/SharePanel"
 import { EdgeSidebar } from "./features/shell/edge-sidebar"
 import { PlusIcon, ShareIcon } from "./features/shell/drawer"
 import { SidebarSpectrum, type SpectrumPointTarget } from "./features/spectrum-panel"
+import { DEFAULT_BOUNDS, boundsKey, isDefaultBounds } from "./features/specific/link"
+import type { Bounds } from "./features/specific/bounds"
+import { EpochPlayer } from "./features/specific/EpochPlayer"
+import { EpochBandsControl, EpochDatesControl } from "./features/specific/SpecificControls"
 import { FOV_WARN_DEG, MAX_FOV, formatNumber, isLargeField, parseDec, parseFov, parseRa } from "./url-state/position"
 import {
   commit,
@@ -90,10 +94,7 @@ export function App() {
       </div>
     )
   }
-  // Specific is not available yet. A link that asks for it renders Composite
-  // from the same coordinates instead, so no Specific data flow starts.
-  const effective = view.mode === "specific" ? { ...view, mode: "composite" as const } : view
-  return <ValidViewApp view={effective} />
+  return <ValidViewApp view={view} />
 }
 
 function ValidViewApp({ view }: { view: View }) {
@@ -112,6 +113,7 @@ function ValidViewApp({ view }: { view: View }) {
   const [rawControls, setRawControls] = useState<RawControlsState | null>(null)
   const [find, setFind] = useState<{ key: string; run: number } | null>(null)
   const [stopping, setStopping] = useState(false)
+  const [epochBusy, setEpochBusy] = useState<{ run: number; busy: boolean }>()
   const findRun = useRef(0)
   const [point, setPoint] = useState<SpectrumPointTarget | null>(null)
   const [catalogStatus, setCatalogStatus] = useState<Record<CatalogSource, CatalogState | undefined>>({
@@ -125,8 +127,9 @@ function ValidViewApp({ view }: { view: View }) {
   const extrasTabRef = useRef<HTMLButtonElement>(null)
   const shareTabRef = useRef<HTMLButtonElement>(null)
   const focusAfterCommit = useRef<"controls" | "data" | "share" | null>(null)
-  const requestedWorkspace = workspaceOf(view)
-  const workspace = requestedWorkspace === "specific" ? "composite" : requestedWorkspace
+  const workspace = workspaceOf(view)
+  const bounds = view.bounds ?? DEFAULT_BOUNDS
+  const applyBounds = (next: Bounds) => commit({ ...view, bounds: isDefaultBounds(next) ? undefined : next })
   const draftFovL = parseFov(draft.fovL)
   const draftFovH = parseFov(draft.fovH)
   const draftLarge = [draftFovL, draftFovH].some((fov) => fov !== undefined && isLargeField(fov))
@@ -155,13 +158,22 @@ function ValidViewApp({ view }: { view: View }) {
   // Stop for the whole armed engine job, plus the cancel drain after disarm.
   // Before SkyShell has published once, treat the armed run as busy so Find
   // does not flash back.
-  const finding = stopping || (armed && (rawControls ? rawControls.mosaicBusy : true))
+  // Specific has no engine job to drain: its busy state is the open frame
+  // requests, reported per run so a fresh Find shows Stop at once.
+  const finding =
+    workspace === "specific"
+      ? armed && (epochBusy?.run === find?.run ? epochBusy.busy : true)
+      : stopping || (armed && (rawControls ? rawControls.mosaicBusy : true))
   const findNow = (next: View) => {
     findRun.current += 1
     setStopping(false)
     setFind({ key: scienceViewKey(next, next.colour ?? DEFAULT_COLOUR_CONFIG), run: findRun.current })
   }
   const stopFinding = () => {
+    if (workspace === "specific") {
+      setFind(null)
+      return
+    }
     setStopping(true)
     const stop = activeRaw.stopMosaic()
     // Disarm immediately so useMosaic does not start a new job after cancel.
@@ -479,30 +491,20 @@ function ValidViewApp({ view }: { view: View }) {
           </span>
         ) : null}
         <div className="modes" role="group" aria-label="Workspace">
-          {MODES.map((mode) => {
-            const available = mode.id !== "specific"
-            return (
-              <button
-                key={mode.id}
-                type="button"
-                aria-pressed={workspace === mode.id}
-                disabled={!available}
-                aria-disabled={!available || undefined}
-                tabIndex={available ? undefined : -1}
-                title={available ? undefined : "Not available yet"}
-                onClick={
-                  available
-                    ? () => {
-                        setFormError(undefined)
-                        commit(setWorkspace(view, mode.id))
-                      }
-                    : undefined
-                }
-              >
-                {mode.label}
-              </button>
-            )
-          })}
+          {MODES.map((mode) => (
+            <button
+              key={mode.id}
+              type="button"
+              aria-pressed={workspace === mode.id}
+              title={mode.id === "specific" ? "Blink the epochs of this field to spot what moves or varies" : undefined}
+              onClick={() => {
+                setFormError(undefined)
+                commit(setWorkspace(view, mode.id))
+              }}
+            >
+              {mode.label}
+            </button>
+          ))}
         </div>
         <button
           className={finding ? "show show--stop" : "show"}
@@ -547,7 +549,7 @@ function ValidViewApp({ view }: { view: View }) {
       >
         <EdgeSidebar
           id="main-controls"
-          label={workspace === "color" ? "Color controls" : "Composite controls"}
+          label={workspace === "color" ? "Color controls" : workspace === "specific" ? "Specific controls" : "Composite controls"}
           side="left"
           width="controls"
           open={controlsOpen}
@@ -571,6 +573,29 @@ function ValidViewApp({ view }: { view: View }) {
                     colorDisplay={activeColorRaw?.colorDisplay}
                     onDisplayChange={handleDisplayChange}
                   />
+                </details>
+              </>
+            ) : workspace === "specific" ? (
+              <>
+                <details className="leftbar-section" open>
+                  <summary>Bands per epoch</summary>
+                  <EpochBandsControl bounds={bounds} onApply={applyBounds} />
+                </details>
+                <details className="leftbar-section" open>
+                  <summary>Date range</summary>
+                  <EpochDatesControl bounds={bounds} onApply={applyBounds} />
+                </details>
+                <details className="leftbar-section">
+                  <summary>Advanced quality</summary>
+                  <label className="mask-toggle">
+                    <input
+                      type="checkbox"
+                      checked={view.mask}
+                      onChange={(event) => commit({ ...view, mask: event.target.checked })}
+                    />
+                    Mask flagged pixels
+                  </label>
+                  <p className="slot-note">Changing this setting recomputes every epoch.</p>
                 </details>
               </>
             ) : (
@@ -612,22 +637,35 @@ function ValidViewApp({ view }: { view: View }) {
             )}
           </div>
         </EdgeSidebar>
-        <SkyShell
-          view={view}
-          armed={armed}
-          run={find?.run ?? 0}
-          visits={visits}
-          exposures={exposures}
-          releaseCounts={releaseCounts}
-          point={point}
-          onPointChange={setPoint}
-          colour={appliedColour}
-          display={display}
-          rawEnabled={rawEnabled}
-          onRawState={onRawState}
-          onCatalogStatus={onCatalogStatus}
-          onOpenSpectrum={() => openExtras("pick")}
-        />
+        {workspace === "specific" ? (
+          <EpochPlayer
+            view={view}
+            bounds={bounds}
+            armed={armed}
+            run={find?.run ?? 0}
+            onBusy={setEpochBusy}
+            onPointChange={setPoint}
+            onOpenSpectrum={() => openExtras("pick")}
+            onCatalogStatus={onCatalogStatus}
+          />
+        ) : (
+          <SkyShell
+            view={view}
+            armed={armed}
+            run={find?.run ?? 0}
+            visits={visits}
+            exposures={exposures}
+            releaseCounts={releaseCounts}
+            point={point}
+            onPointChange={setPoint}
+            colour={appliedColour}
+            display={display}
+            rawEnabled={rawEnabled}
+            onRawState={onRawState}
+            onCatalogStatus={onCatalogStatus}
+            onOpenSpectrum={() => openExtras("pick")}
+          />
+        )}
         <EdgeSidebar
           id="drawer-extras"
           label="Extras"
@@ -774,6 +812,8 @@ function scienceViewKey(view: View, colour: ColourConfigValue): string {
     mode: view.mode,
     pins: view.pins,
     bands: colour.colorBands,
+    // The epoch selection is job identity in Specific only.
+    epochs: view.mode === "specific" ? boundsKey(view.bounds ?? DEFAULT_BOUNDS) : undefined,
   })
 }
 
