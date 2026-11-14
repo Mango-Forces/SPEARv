@@ -80,10 +80,10 @@ export function EdgeSidebar(props: EdgeSidebarProps) {
           aria-hidden="true"
         >
           {labeled ? <span className="edge-sidebar__tab-label">{props.tabLabel}</span> : null}
-          <span className="edge-sidebar__chevron">
-            {iconOnly && props.tabIcon ? (
-              props.tabIcon
-            ) : (
+          {props.tabIcon ? (
+            <span className="edge-sidebar__icon">{props.tabIcon}</span>
+          ) : (
+            <span className="edge-sidebar__chevron">
               <svg
                 viewBox="0 0 16 16"
                 width="16"
@@ -97,8 +97,8 @@ export function EdgeSidebar(props: EdgeSidebarProps) {
               >
                 <path d="m6 3 5 5-5 5" />
               </svg>
-            )}
-          </span>
+            </span>
+          )}
         </span>
       </button>
     </div>

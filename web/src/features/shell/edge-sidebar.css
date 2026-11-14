@@ -88,10 +88,10 @@
 /* Hit target larger than the tongue; no visible box of its own. */
 .edge-sidebar__tab {
   position: absolute;
-  top: calc(50% + var(--edge-tab-offset));
+  top: calc(50% - (var(--edge-tongue-h) + 12px) / 2 + var(--edge-tab-offset));
+  top: round(nearest, calc(50% - (var(--edge-tongue-h) + 12px) / 2 + var(--edge-tab-offset)), 1px);
   z-index: 2;
-  display: grid;
-  place-items: center;
+  display: block;
   width: 44px;
   height: calc(var(--edge-tongue-h) + 12px);
   padding: 0;
@@ -101,7 +101,7 @@
   color: var(--text-2);
   cursor: pointer;
   pointer-events: auto;
-  transform: translateY(-50%);
+  transition: left var(--edge-motion) var(--edge-ease), right var(--edge-motion) var(--edge-ease);
   outline: none;
   box-shadow: none;
 }
@@ -110,19 +110,19 @@
 .edge-sidebar--right .edge-sidebar__tab { right: 0; }
 
 .edge-sidebar[data-open="true"].edge-sidebar--left .edge-sidebar__tab {
-  left: auto;
-  right: 0;
-  transform: translate(100%, -50%);
+  left: calc(var(--edge-width) - 1px);
+  right: auto;
 }
 
 .edge-sidebar[data-open="true"].edge-sidebar--right .edge-sidebar__tab {
-  left: 0;
-  right: auto;
-  transform: translate(-100%, -50%);
+  left: auto;
+  right: calc(var(--edge-width) - 1px);
 }
 
 /* One tongue shape for controls, extras, share, editor. */
 .edge-sidebar__tongue {
+  position: absolute;
+  top: 6px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -160,25 +160,27 @@
  * Open: merge the panel-facing side; keep the outer edge as the silhouette.
  */
 .edge-sidebar--left .edge-sidebar__tongue {
-  border-left-color: transparent;
-  border-radius: 0 4px 4px 0;
+  left: 0;
+  border-left-width: 0;
+  border-radius: 0 7px 7px 0;
 }
 
 .edge-sidebar--right .edge-sidebar__tongue {
-  border-right-color: transparent;
-  border-radius: 4px 0 0 4px;
+  right: 0;
+  border-right-width: 0;
+  border-radius: 7px 0 0 7px;
 }
 
 .edge-sidebar[data-open="true"].edge-sidebar--left .edge-sidebar__tongue {
   /* panel is on the left; outer edge is right */
-  border-left-color: transparent;
+  border-left-width: 0;
   border-right-color: var(--line-strong);
   box-shadow: 4px 2px 10px rgb(0 0 0 / 0.28);
 }
 
 .edge-sidebar[data-open="true"].edge-sidebar--right .edge-sidebar__tongue {
   /* panel is on the right; outer edge is left */
-  border-right-color: transparent;
+  border-right-width: 0;
   border-left-color: var(--line-strong);
   box-shadow: -4px 2px 10px rgb(0 0 0 / 0.28);
 }
@@ -193,13 +195,13 @@
   background: var(--raised-hover);
 }
 
-/* Preserve outer-cover transparency on the attachment side while hovering. */
+/* Keep attachment edge flush while hovering. */
 .edge-sidebar--left .edge-sidebar__tab:hover:not(:disabled):not([aria-expanded="true"]) .edge-sidebar__tongue {
-  border-left-color: transparent;
+  border-left-width: 0;
 }
 
 .edge-sidebar--right .edge-sidebar__tab:hover:not(:disabled):not([aria-expanded="true"]) .edge-sidebar__tongue {
-  border-right-color: transparent;
+  border-right-width: 0;
 }
 
 .edge-sidebar__tab[aria-expanded="true"],
@@ -214,10 +216,10 @@
   background: var(--panel);
 }
 
-/* Expanded: accent on outer edge only; attachment side stays open into the panel. */
+/* Expanded: accent on outer edge only; attachment side merges flush into the panel. */
 .edge-sidebar[data-open="true"].edge-sidebar--left .edge-sidebar__tab[aria-expanded="true"] .edge-sidebar__tongue,
 .edge-sidebar[data-open="true"].edge-sidebar--left .edge-sidebar__tab:hover:not(:disabled) .edge-sidebar__tongue {
-  border-left-color: transparent;
+  border-left-width: 0;
   border-right-color: var(--accent);
   border-top-color: var(--accent);
   border-bottom-color: var(--accent);
@@ -225,13 +227,13 @@
 
 .edge-sidebar[data-open="true"].edge-sidebar--right .edge-sidebar__tab[aria-expanded="true"] .edge-sidebar__tongue,
 .edge-sidebar[data-open="true"].edge-sidebar--right .edge-sidebar__tab:hover:not(:disabled) .edge-sidebar__tongue {
-  border-right-color: transparent;
+  border-right-width: 0;
   border-left-color: var(--accent);
   border-top-color: var(--accent);
   border-bottom-color: var(--accent);
 }
 
-/* Focus: ring on tongue silhouette only — offset outside, never a box on the hit target. */
+/* Focus: ring on tongue silhouette only (offset outside, never a box on the hit target). */
 .edge-sidebar__tab:focus,
 .edge-sidebar__tab:focus-visible {
   outline: none;
@@ -243,9 +245,13 @@
   outline-offset: 2px;
 }
 
+.edge-sidebar__icon,
 .edge-sidebar__chevron {
   display: grid;
   place-items: center;
+}
+
+.edge-sidebar__chevron {
   transition: transform var(--edge-motion) var(--edge-ease);
 }
 
@@ -271,7 +277,7 @@
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 30;
+  z-index: auto;
   width: 0;
 }
 
@@ -280,11 +286,16 @@
 }
 
 .edge-sidebar--right.edge-sidebar--overlay .edge-sidebar__panel {
+  z-index: 30;
   box-shadow: -16px 0 40px rgb(0 0 0 / 0.32);
 }
 
-.edge-sidebar--right.edge-sidebar--overlay.edge-sidebar--share {
-  z-index: 40;
+.edge-sidebar--right.edge-sidebar--overlay.edge-sidebar--front .edge-sidebar__panel {
+  z-index: 31;
+}
+
+.edge-sidebar--right.edge-sidebar--overlay .edge-sidebar__tab {
+  z-index: 32;
 }
 
 .edge-sidebar--left.edge-sidebar--overlay {

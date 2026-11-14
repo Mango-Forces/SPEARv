@@ -16,7 +16,7 @@ import type { CatalogState } from "./features/overlay/useCatalog"
 import type { CatalogSource } from "./features/overlay/catalog"
 import { SharePanel } from "./features/share/SharePanel"
 import { EdgeSidebar } from "./features/shell/edge-sidebar"
-import { ShareIcon } from "./features/shell/drawer"
+import { PlusIcon, ShareIcon } from "./features/shell/drawer"
 import { SidebarSpectrum, type SpectrumPointTarget } from "./features/spectrum-panel"
 import { FOV_WARN_DEG, MAX_FOV, formatNumber, isLargeField, parseDec, parseFov, parseRa } from "./url-state/position"
 import {
@@ -54,8 +54,8 @@ const EMPTY_RAW_CONTROLS: RawControlsState = {
   cancel: () => undefined,
 }
 
-const LOGO = new URL("./assets/spearv-logo.svg", import.meta.url).href
-const LOGO_FALLBACK = new URL("./assets/spearv-logo-transparent.png", import.meta.url).href
+const LOGO = new URL("./assets/spear-logo.svg", import.meta.url).href
+const LOGO_FALLBACK = new URL("./assets/spear-logo-transparent.png", import.meta.url).href
 const initialSidebarOpen = () => typeof window === "undefined" || !window.matchMedia("(max-width: 900px)").matches
 
 const MODES: { id: Workspace; label: string }[] = [
@@ -106,6 +106,7 @@ function ValidViewApp({ view }: { view: View }) {
   const [dataDrawer, setDataDrawer] = useState<DataDrawer>("spectrum")
   const [dataOpen, setDataOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [topRightDrawer, setTopRightDrawer] = useState<"extras" | "share">("extras")
   const [rawControls, setRawControls] = useState<RawControlsState | null>(null)
   const [point, setPoint] = useState<SpectrumPointTarget | null>(null)
   const [catalogStatus, setCatalogStatus] = useState<Record<CatalogSource, CatalogState | undefined>>({
@@ -267,8 +268,10 @@ function ValidViewApp({ view }: { view: View }) {
       return
     }
     if (source === "pick" && !spectrumAutoOpened.current) spectrumAutoOpened.current = true
-    focusAfterCommit.current = source === "tongue" && !shareOpen ? "data" : null
+    focusAfterCommit.current = source === "tongue" ? "data" : null
     setDataDrawer(name)
+    setTopRightDrawer("extras")
+    setShareOpen(false)
     setDataOpen(true)
   }
 
@@ -276,6 +279,8 @@ function ValidViewApp({ view }: { view: View }) {
     const order: DataDrawer[] = ["spectrum", "layers"]
     const next = order[(order.indexOf(dataDrawer) + dir + order.length) % order.length]
     setDataDrawer(next)
+    setTopRightDrawer("extras")
+    setShareOpen(false)
     if (!dataOpen) setDataOpen(true)
   }
 
@@ -295,7 +300,7 @@ function ValidViewApp({ view }: { view: View }) {
       if (event.key !== "Escape") return
       event.preventDefault()
       if (shareOpen) {
-        focusAfterCommit.current = dataOpen ? "data" : "share"
+        focusAfterCommit.current = "share"
         setShareOpen(false)
         return
       }
@@ -353,7 +358,7 @@ function ValidViewApp({ view }: { view: View }) {
             }}
           />
         </a>
-        <form className="location" onSubmit={submit} noValidate>
+        <form id="location-form" className="location" onSubmit={submit} noValidate>
           <label className="field">
             <span title="Right ascension, 0° to 360°">RA</span>
             <input
@@ -376,19 +381,18 @@ function ValidViewApp({ view }: { view: View }) {
               spellCheck={false}
             />
           </label>
-          <div className="fov-pair">
-            <label className="field fov">
-              <span title="Field of view length, degrees">FOV-L</span>
-              <input
-                name="fov_l"
-                aria-label="FOV-L, degrees"
-                value={draft.fovL}
-                onChange={(event) => setDraft({ ...draft, fovL: event.target.value, ...(draftLinked ? { fovH: event.target.value } : {}) })}
-                inputMode="decimal"
-                autoComplete="off"
-                aria-describedby={draftLarge ? "fov-warning" : undefined}
-              />
-            </label>
+          <div className="field fov fov-pair">
+            <span title="Field of view length and height, degrees">FOV-L/H</span>
+            <input
+              name="fov_l"
+              aria-label="FOV-L"
+              title="Field of view length, degrees"
+              value={draft.fovL}
+              onChange={(event) => setDraft({ ...draft, fovL: event.target.value, ...(draftLinked ? { fovH: event.target.value } : {}) })}
+              inputMode="decimal"
+              autoComplete="off"
+              aria-describedby={draftLarge ? "fov-warning" : undefined}
+            />
             <button
               className={`fov-chain ${draftLinked ? "linked" : "unlinked"}`}
               type="button"
@@ -421,18 +425,16 @@ function ValidViewApp({ view }: { view: View }) {
                 </g>
               </svg>
             </button>
-            <label className="field fov">
-              <span title="Field of view height, degrees">FOV-H</span>
-              <input
-                name="fov_h"
-                aria-label="FOV-H, degrees"
-                value={draft.fovH}
-                onChange={(event) => setDraft({ ...draft, fovH: event.target.value, ...(draftLinked ? { fovL: event.target.value } : {}) })}
-                inputMode="decimal"
-                autoComplete="off"
-                aria-describedby={draftLarge ? "fov-warning" : undefined}
-              />
-            </label>
+            <input
+              name="fov_h"
+              aria-label="FOV-H"
+              title="Field of view height, degrees"
+              value={draft.fovH}
+              onChange={(event) => setDraft({ ...draft, fovH: event.target.value, ...(draftLinked ? { fovL: event.target.value } : {}) })}
+              inputMode="decimal"
+              autoComplete="off"
+              aria-describedby={draftLarge ? "fov-warning" : undefined}
+            />
           </div>
           <label className="release">
             <span>Release</span>
@@ -445,9 +447,6 @@ function ValidViewApp({ view }: { view: View }) {
               ))}
             </select>
           </label>
-          <button className="show" type="submit">
-            View
-          </button>
         </form>
         {draftLarge ? (
           <span id="fov-warning" className="fov-warning">
@@ -485,6 +484,9 @@ function ValidViewApp({ view }: { view: View }) {
             )
           })}
         </div>
+        <button className="show" type="submit" form="location-form">
+          View
+        </button>
         </header>
         {railCue ? (
           <button
@@ -593,12 +595,11 @@ function ValidViewApp({ view }: { view: View }) {
         <EdgeSidebar
           id="drawer-extras"
           label="Extras"
-          tabLabel="Extras"
+          tabIcon={<PlusIcon />}
           side="right"
           width="drawer"
           layout="overlay"
           open={dataOpen}
-          obscured={shareOpen}
           tabRef={extrasTabRef}
           tabOffset={0}
           onOpenChange={(open) => {
@@ -607,9 +608,11 @@ function ValidViewApp({ view }: { view: View }) {
               return
             }
             focusAfterCommit.current = "data"
+            setTopRightDrawer("extras")
+            setShareOpen(false)
             setDataOpen(true)
           }}
-          className="edge-sidebar--data"
+          className={`edge-sidebar--data${topRightDrawer === "extras" ? " edge-sidebar--front" : ""}`}
         >
           <div className="drawer-body">
             <div className="extras-switch" role="tablist" aria-label="Extras panel">
@@ -707,10 +710,16 @@ function ValidViewApp({ view }: { view: View }) {
           tabOffset={SHARE_TONGUE_OFFSET}
           tabRef={shareTabRef}
           onOpenChange={(open) => {
-            if (open) focusAfterCommit.current = "share"
-            setShareOpen(open)
+            if (!open) {
+              setShareOpen(false)
+              return
+            }
+            focusAfterCommit.current = "share"
+            setTopRightDrawer("share")
+            setDataOpen(false)
+            setShareOpen(true)
           }}
-          className="edge-sidebar--share"
+          className={`edge-sidebar--share${topRightDrawer === "share" ? " edge-sidebar--front" : ""}`}
         >
           <div className="drawer-body">
             <SharePanel
@@ -939,7 +948,7 @@ function LayerStatus(props: { source: CatalogSource; view: View; state: CatalogS
   return (
     <span className="overlay-status">
       {count} marker{count === 1 ? "" : "s"}
-      {state.body?.truncated ? " · list truncated — zoom in" : ""}
+      {state.body?.truncated ? " · list truncated; zoom in" : ""}
     </span>
   )
 }

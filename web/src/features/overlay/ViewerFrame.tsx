@@ -91,7 +91,7 @@ export function ViewerFrame(props: {
                     data-viewport-native-y={hover.row.y}
                   >
                     <strong>{hover.row.id}</strong>
-                    <span>mag {hover.row.mag ?? "—"}</span>
+                    <span>mag {hover.row.mag ?? "-"}</span>
                   </div>
                 ) : null}
               </>
@@ -200,19 +200,15 @@ export function skyAtPixel(x: number, y: number, width: number, height: number, 
 }
 
 function formatRa(ra: number): string {
-  const tenths = Math.round((((ra % 360) + 360) % 360) * 2400)
-  const h = Math.floor(tenths / 36000) % 24
-  const m = Math.floor((tenths % 36000) / 600)
-  const s = (tenths % 600) / 10
-  return `${h}h ${String(m).padStart(2, "0")}m ${s.toFixed(1).padStart(4, "0")}s`
+  const wrapped = ((ra % 360) + 360) % 360
+  const rounded = (Math.round(wrapped * 10000) % 3600000) / 10000
+  return `${rounded.toFixed(4)}°`
 }
 
 function formatDec(dec: number): string {
-  const tenths = Math.round(Math.abs(dec) * 36000)
-  const d = Math.floor(tenths / 36000)
-  const m = Math.floor((tenths % 36000) / 600)
-  const s = (tenths % 600) / 10
-  return `${dec < 0 ? "-" : "+"}${d}° ${String(m).padStart(2, "0")}' ${s.toFixed(1).padStart(4, "0")}"`
+  const rounded = Math.round(dec * 10000) / 10000
+  const sign = rounded < 0 ? "-" : "+"
+  return `${sign}${Math.abs(rounded).toFixed(4)}°`
 }
 
 /** Radius in screen pixels. Magnitudes live in different ranges per catalog,
@@ -240,7 +236,7 @@ export function Marker(props: {
     x: Math.min(native.w - 1, Math.max(0, Math.floor(row.x))),
     y: Math.min(native.h - 1, Math.max(0, Math.floor(row.y))),
   }
-  const label = `${row.id} · mag ${row.mag ?? "—"}`
+  const label = `${row.id} · mag ${row.mag ?? "-"}`
   const diamond = `0,${-radius} ${radius},0 0,${radius} ${-radius},0`
   return (
     <g

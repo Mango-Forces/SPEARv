@@ -218,9 +218,11 @@ summary:focus-visible {
 .field input {
   width: 8.5rem;
   height: 34px;
+  padding: 0 8px;
   font-family: var(--sans);
   font-size: 14px;
   font-weight: 600;
+  line-height: 32px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -231,20 +233,22 @@ summary:focus-visible {
 .release select {
   height: 34px;
   max-width: 11rem;
+  padding: 0 8px;
   font-family: var(--sans);
   font-size: 13.5px;
   font-weight: 600;
+  line-height: 32px;
   font-variant-numeric: tabular-nums;
 }
 
-.location .show,
+.topbar .show,
 .location .fov-chain[aria-pressed="true"] {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-ink);
 }
 
-.location .show {
+.topbar .show {
   height: 34px;
   padding: 0 18px;
   border-radius: 4px;
@@ -252,7 +256,7 @@ summary:focus-visible {
   font-size: 14px;
 }
 
-.location .show:hover:not(:disabled),
+.topbar .show:hover:not(:disabled),
 .location .fov-chain[aria-pressed="true"]:hover:not(:disabled) {
   border-color: #d4ff5c;
   background: #d4ff5c;
@@ -703,7 +707,7 @@ figcaption .delta-legend {
 
 
 
-  .location .show {
+  .topbar .show {
     height: 32px;
     padding: 0 14px;
   }
@@ -801,10 +805,12 @@ figcaption .delta-legend {
 .fov-pair {
   display: flex;
   align-items: center;
-  gap: 6px;
 }
 .fov-chain {
-  width: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
   height: 34px;
   padding: 0;
   color: var(--text-2);

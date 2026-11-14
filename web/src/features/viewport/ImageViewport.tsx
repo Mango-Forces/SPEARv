@@ -1,34 +1,22 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { JSX, KeyboardEvent, PointerEvent, ReactNode } from "react"
+import {
+  clampGeometry,
+  clampZoom,
+  measureGeometry,
+  panGeometry,
+  rebaseDrag,
+  ZOOM_STEP,
+  zoomGeometry,
+  type DragState,
+  type ImageViewportNative,
+  type PictureGeometry,
+} from "./viewport-geometry.ts"
 import "./viewport.css"
 
-const MIN_ZOOM = 0.25
-const MAX_ZOOM = 16
-const VISIBLE_MARGIN = 32
 const WHEEL_LINE_PX = 16
-const ZOOM_STEP = 1.2
 
-type PictureGeometry = {
-  nativeKey: string
-  nativeW: number
-  nativeH: number
-  viewportW: number
-  viewportH: number
-  baseScale: number
-  zoom: number
-  tx: number
-  ty: number
-}
-
-type DragState = {
-  pointerId: number
-  x: number
-  y: number
-  tx: number
-  ty: number
-}
-
-export type ImageViewportNative = { w: number; h: number }
+export type { ImageViewportNative }
 
 export type ImageViewportContext = {
   baseScale: number
@@ -53,7 +41,6 @@ export function ImageViewport(props: ImageViewportProps): JSX.Element {
   const resetKeyRef = useRef(props.resetKey)
   const pendingFitRef = useRef(false)
   const wheelFrameRef = useRef<number | undefined>(undefined)
-  const wheelGeometryRef = useRef<PictureGeometry | undefined>(undefined)
   const [geometry, setGeometry] = useState<PictureGeometry>()
   const [dragging, setDragging] = useState(false)
 
@@ -78,11 +65,31 @@ export function ImageViewport(props: ImageViewportProps): JSX.Element {
     picture.style.transform = `translate(${next.tx}px, ${next.ty}px)`
   }
 
+  const clearDrag = (target?: HTMLDivElement | null, pointerId?: number) => {
+    const drag = dragRef.current
+    if (!drag) return false
+    if (pointerId !== undefined && drag.pointerId !== pointerId) return false
+    dragRef.current = undefined
+    if (target && target.hasPointerCapture(drag.pointerId)) {
+      target.releasePointerCapture(drag.pointerId)
+    }
+    setDragging(false)
+    return true
+  }
+
+  const finishDrag = (target?: HTMLDivElement | null, pointerId?: number) => {
+    if (!clearDrag(target, pointerId)) return
+    if (wheelFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(wheelFrameRef.current)
+      wheelFrameRef.current = undefined
+    }
+    setGeometry(geometryRef.current)
+  }
+
   const writeGeometry = (next: PictureGeometry | undefined, commit = true) => {
     if (commit && wheelFrameRef.current !== undefined) {
       window.cancelAnimationFrame(wheelFrameRef.current)
       wheelFrameRef.current = undefined
-      wheelGeometryRef.current = undefined
     }
     geometryRef.current = next
     applyPictureStyle(next)
@@ -99,36 +106,24 @@ export function ImageViewport(props: ImageViewportProps): JSX.Element {
     const nativeKey = `${native.w}x${native.h}`
     const previous = geometryRef.current
     const shouldFit = forceFit || pendingFitRef.current || !previous || previous.nativeKey !== nativeKey
-    const baseScale = Math.min(rect.width / native.w, rect.height / native.h)
-    const zoom = shouldFit ? 1 : previous.zoom
-    const displayedW = native.w * baseScale * zoom
-    const displayedH = native.h * baseScale * zoom
-    const centerNativeX = previous && !shouldFit ? (previous.viewportW / 2 - previous.tx) / (previous.baseScale * previous.zoom) : undefined
-    const centerNativeY = previous && !shouldFit ? (previous.viewportH / 2 - previous.ty) / (previous.baseScale * previous.zoom) : undefined
-    const next = clampGeometry({
-      nativeKey,
-      nativeW: native.w,
-      nativeH: native.h,
-      viewportW: rect.width,
-      viewportH: rect.height,
-      baseScale,
-      zoom,
-      tx:
-        centerNativeX === undefined
-          ? (rect.width - displayedW) / 2
-          : rect.width / 2 - centerNativeX * baseScale * zoom,
-      ty:
-        centerNativeY === undefined
-          ? (rect.height - displayedH) / 2
-          : rect.height / 2 - centerNativeY * baseScale * zoom,
-    })
+    if (!shouldFit && previous && previous.viewportW === rect.width && previous.viewportH === rect.height) {
+      pendingFitRef.current = false
+      return
+    }
+    const result = measureGeometry(previous, native, rect.width, rect.height, shouldFit)
     pendingFitRef.current = false
-    writeGeometry(next)
+    if (result.fitted) {
+      clearDrag(root)
+    } else if (dragRef.current) {
+      dragRef.current = rebaseDrag(dragRef.current, result.geometry)
+    }
+    writeGeometry(result.geometry)
   }
 
   useLayoutEffect(() => {
     if (!props.native) {
       pendingFitRef.current = true
+      clearDrag(rootRef.current)
       writeGeometry(undefined)
       return
     }
@@ -148,9 +143,14 @@ export function ImageViewport(props: ImageViewportProps): JSX.Element {
   }, [props.resetKey])
 
   useLayoutEffect(() => {
-    applyPictureStyle(geometry)
-    positionHud(geometry)
-  }, [geometry, props.hud])
+    const active = geometryRef.current ?? geometry
+    applyPictureStyle(active)
+    positionHud(active)
+  }, [geometry])
+
+  useLayoutEffect(() => {
+    positionHud(geometryRef.current ?? geometry)
+  }, [props.hud])
 
   useEffect(() => {
     const root = rootRef.current
@@ -168,23 +168,26 @@ export function ImageViewport(props: ImageViewportProps): JSX.Element {
       const pointerX = event.clientX - rect.left
       const pointerY = event.clientY - rect.top
       const next = zoomGeometry(current, nextZoom, pointerX, pointerY)
+      if (dragRef.current) {
+        dragRef.current = rebaseDrag(dragRef.current, next)
+      }
       writeGeometry(next, false)
-      wheelGeometryRef.current = next
       if (wheelFrameRef.current !== undefined) return
       wheelFrameRef.current = window.requestAnimationFrame(() => {
         wheelFrameRef.current = undefined
-        const queued = wheelGeometryRef.current
-        wheelGeometryRef.current = undefined
-        if (queued) setGeometry(queued)
+        if (geometryRef.current) setGeometry(geometryRef.current)
       })
     }
+    const onBlur = () => finishDrag(root)
     root.addEventListener("wheel", onWheel, { passive: false })
-    return () => root.removeEventListener("wheel", onWheel)
-  }, [])
-
-  useEffect(() => {
+    window.addEventListener("blur", onBlur)
     return () => {
-      if (wheelFrameRef.current !== undefined) window.cancelAnimationFrame(wheelFrameRef.current)
+      root.removeEventListener("wheel", onWheel)
+      window.removeEventListener("blur", onBlur)
+      if (wheelFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(wheelFrameRef.current)
+        wheelFrameRef.current = undefined
+      }
     }
   }, [])
 
@@ -193,7 +196,9 @@ export function ImageViewport(props: ImageViewportProps): JSX.Element {
     const root = rootRef.current
     if (!current || !root) return
     const rect = root.getBoundingClientRect()
-    writeGeometry(zoomGeometry(current, nextZoom, rect.width / 2, rect.height / 2))
+    const next = zoomGeometry(current, nextZoom, rect.width / 2, rect.height / 2)
+    if (dragRef.current) dragRef.current = rebaseDrag(dragRef.current, next)
+    writeGeometry(next)
   }
 
   const fit = () => {
@@ -234,19 +239,22 @@ export function ImageViewport(props: ImageViewportProps): JSX.Element {
               : undefined
     if (!movement) return
     event.preventDefault()
-    writeGeometry(
-      clampGeometry({
-        ...current,
-        tx: current.tx + movement.x,
-        ty: current.ty + movement.y,
-      }),
-    )
+    const next = clampGeometry({
+      ...current,
+      tx: current.tx + movement.x,
+      ty: current.ty + movement.y,
+    })
+    if (dragRef.current) dragRef.current = rebaseDrag(dragRef.current, next)
+    writeGeometry(next)
   }
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 2 || !geometryRef.current) return
     if (event.target instanceof Element && event.target.closest(".image-viewport-hud")) return
     event.preventDefault()
+    if (dragRef.current && dragRef.current.pointerId !== event.pointerId) {
+      clearDrag(event.currentTarget, dragRef.current.pointerId)
+    }
     event.currentTarget.setPointerCapture(event.pointerId)
     const current = geometryRef.current
     dragRef.current = {
@@ -255,6 +263,8 @@ export function ImageViewport(props: ImageViewportProps): JSX.Element {
       y: event.clientY,
       tx: current.tx,
       ty: current.ty,
+      lastX: event.clientX,
+      lastY: event.clientY,
     }
     setDragging(true)
   }
@@ -263,29 +273,14 @@ export function ImageViewport(props: ImageViewportProps): JSX.Element {
     const drag = dragRef.current
     const current = geometryRef.current
     if (!drag || drag.pointerId !== event.pointerId || !current) return
-    event.preventDefault()
-    writeGeometry(
-      clampGeometry({
-        ...current,
-        tx: drag.tx + event.clientX - drag.x,
-        ty: drag.ty + event.clientY - drag.y,
-      }),
-      false,
-    )
-  }
-
-  const endDrag = (event: PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-    dragRef.current = undefined
-    setDragging(false)
-    if (wheelFrameRef.current !== undefined) {
-      window.cancelAnimationFrame(wheelFrameRef.current)
-      wheelFrameRef.current = undefined
-      wheelGeometryRef.current = undefined
+    if (event.pointerType === "mouse" && (event.buttons & 2) === 0) {
+      finishDrag(event.currentTarget, event.pointerId)
+      return
     }
-    setGeometry(geometryRef.current)
+    event.preventDefault()
+    drag.lastX = event.clientX
+    drag.lastY = event.clientY
+    writeGeometry(panGeometry(current, drag, event.clientX, event.clientY), false)
   }
 
   const context = geometry
@@ -318,8 +313,9 @@ export function ImageViewport(props: ImageViewportProps): JSX.Element {
       onKeyDown={onKeyDown}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
+      onPointerUp={(event) => finishDrag(event.currentTarget, event.pointerId)}
+      onPointerCancel={(event) => finishDrag(event.currentTarget, event.pointerId)}
+      onLostPointerCapture={(event) => finishDrag(event.currentTarget, event.pointerId)}
       onContextMenu={(event) => event.preventDefault()}
     >
       <div
@@ -348,43 +344,7 @@ export function ImageViewport(props: ImageViewportProps): JSX.Element {
   )
 }
 
-function clampZoom(zoom: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
-}
-
-function clampGeometry(geometry: PictureGeometry, clamp = true): PictureGeometry {
-  if (!clamp) return geometry
-  const width = geometry.nativeW * geometry.baseScale * geometry.zoom
-  const height = geometry.nativeH * geometry.baseScale * geometry.zoom
-  return {
-    ...geometry,
-    tx: clampOffset(geometry.tx, geometry.viewportW, width),
-    ty: clampOffset(geometry.ty, geometry.viewportH, height),
-  }
-}
-
-function clampOffset(value: number, viewport: number, displayed: number): number {
-  const min = VISIBLE_MARGIN - displayed
-  const max = viewport - VISIBLE_MARGIN
-  if (min > max) return (min + max) / 2
-  return Math.min(max, Math.max(min, value))
-}
-
-function zoomGeometry(geometry: PictureGeometry, nextZoom: number, x: number, y: number): PictureGeometry {
-  const zoom = clampZoom(nextZoom)
-  const effectiveScale = geometry.baseScale * geometry.zoom
-  const nativeX = (x - geometry.tx) / effectiveScale
-  const nativeY = (y - geometry.ty) / effectiveScale
-  const nextScale = geometry.baseScale * zoom
-  return clampGeometry({
-    ...geometry,
-    zoom,
-    tx: x - nativeX * nextScale,
-    ty: y - nativeY * nextScale,
-  })
-}
-
 function isControlTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false
-  return target.closest("input, textarea, select, button, [contenteditable='true'], [role='button']") !== null
+  return target.closest("input, textarea, select, button, [contenteditable=true], [role=button]") !== null
 }
