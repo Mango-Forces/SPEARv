@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["core", "binder"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+spearv-core = { path = "core" }
+async-trait = "0.1"
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net", "time", "io-util"] }
+utoipa = { version = "5", features = ["axum_extras"] }
+utoipa-axum = "0.2"

@@ -1,0 +1,7 @@
+target/
+.build/
+.env
+.env.*
+*.fits
+*.parquet
+.DS_Store
