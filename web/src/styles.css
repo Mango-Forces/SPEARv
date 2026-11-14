@@ -234,14 +234,30 @@ summary:focus-visible {
 }
 
 .release select {
+  box-sizing: border-box;
+  width: 10.5rem;
+  min-width: 10.5rem;
+  max-width: 10.5rem;
   height: 34px;
-  max-width: 11rem;
-  padding: 0 8px;
+  padding: 0 1.75rem 0 8px;
   font-family: var(--sans);
   font-size: 13.5px;
   font-weight: 600;
   line-height: 32px;
   font-variant-numeric: tabular-nums;
+  /* Native arrows track content width; fix the box and draw one chevron. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background-color: var(--sunken);
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%),
+    linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
+  background-position: calc(100% - 14px) calc(50% - 1px), calc(100% - 9px) calc(50% - 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
 }
 
 .topbar .show,
@@ -695,7 +711,9 @@ figcaption .delta-legend {
   }
 
   .release select {
-    max-width: 9rem;
+    width: 9.5rem;
+    min-width: 9.5rem;
+    max-width: 9.5rem;
   }
 }
 
