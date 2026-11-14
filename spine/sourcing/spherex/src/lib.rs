@@ -864,7 +864,7 @@ fn disk_layout_path(dir: &Path, url: &str, etag: &str, size: u64) -> PathBuf {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(format!("cfitsio-v1:{url}:{etag}:{size}").as_bytes());
-    dir.join("cfitsio-layouts-v1")
+    dir.join("cfitsio-layouts-v2")
         .join(format!("{}.bin", hex::encode(hasher.finalize())))
 }
 
@@ -917,20 +917,13 @@ fn save_disk_layout(path: &Path, layout: &Layout) {
     };
     let Ok(meta_bytes) = serde_json::to_vec(&meta) else { return };
     let Ok(meta_len) = u32::try_from(meta_bytes.len()) else { return };
-    let Ok(count) = u32::try_from(layout.pages.len()) else { return };
-    let total: usize = 8
-        + meta_bytes.len()
-        + layout.pages.iter().map(|(_, p)| 12 + p.len()).sum::<usize>();
-    let mut out = Vec::with_capacity(total);
+    // Typed metadata only: header pages stay in the bounded memory cache.
+    // Persisting them costs about 250 KiB per exposure, which a full-sky
+    // index would turn into hundreds of gigabytes.
+    let mut out = Vec::with_capacity(8 + meta_bytes.len());
     out.extend_from_slice(&meta_len.to_le_bytes());
     out.extend_from_slice(&meta_bytes);
-    out.extend_from_slice(&count.to_le_bytes());
-    for (offset, page) in layout.pages.iter() {
-        let Ok(len) = u32::try_from(page.len()) else { return };
-        out.extend_from_slice(&offset.to_le_bytes());
-        out.extend_from_slice(&len.to_le_bytes());
-        out.extend_from_slice(page);
-    }
+    out.extend_from_slice(&0u32.to_le_bytes());
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let tmp = path.with_extension(format!(
         "tmp.{}.{}",
