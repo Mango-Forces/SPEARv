@@ -33,6 +33,8 @@ export type MosaicState = {
   /** The engine went away mid-job, so the view is waiting to start it again. */
   reconnecting?: boolean
   error?: string
+  /** Stop was pressed; the engine cancel has not finished yet. */
+  stopping?: boolean
   /** Stop the job on this page and on the engine, leaving nothing running. */
   stop: () => void
   /** Run this view again under a fresh job, without a second Find click. */
@@ -164,10 +166,14 @@ export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS,
     return () => {
       window.clearTimeout(timer)
       ac.abort()
+      const jobId = control.current.ac === ac ? control.current.jobId : undefined
       if (control.current.ac === ac) {
         control.current.ac = undefined
         control.current.jobId = undefined
       }
+      // Disarming (new field, mode change, unmount) must free the engine slot,
+      // not only abort this page's fetches.
+      if (jobId) void cancelJob(jobId)
     }
   }, [enabled, run, restarts, ra, dec, fovL, fovH, dr, mask, color, mode, pinKey, bandsKey])
 
@@ -176,8 +182,17 @@ export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS,
     control.current.ac = undefined
     control.current.jobId = undefined
     ac?.abort()
-    setState(IDLE)
-    if (jobId) void cancelJob(jobId)
+    // Stay on Stop until DELETE finishes so the button does not flip to Find
+    // while the engine is still draining the job and holding budget.
+    setState({ ...IDLE, stopping: true })
+    if (!jobId) {
+      setState(IDLE)
+      return
+    }
+    void cancelJob(jobId).finally(() => {
+      if (control.current.jobId) return
+      setState(IDLE)
+    })
   }, [])
   const restart = useCallback(() => setRestarts((count) => count + 1), [])
 
@@ -725,6 +740,7 @@ function serverError(error: unknown): string | undefined {
  * channel's settled reads over its total, then bytes and seconds. */
 export function statusText(state: MosaicState): string {
   const status = state.status
+  if (state.stopping) return "Stopping"
   if (state.error) return "failed"
   if (state.reconnecting) return "Engine restarting, resuming shortly"
   if (!status) return "Starting mosaic"
@@ -764,10 +780,17 @@ export function warningText(state: MosaicState): string | undefined {
   return parts.filter(Boolean).join(" ") || undefined
 }
 
+/** True while the page still owns an in-flight or stopping engine job. Find
+ * must stay Stop for this whole window, not only while tiles are painting. */
 export function isBusy(state: MosaicState): boolean {
-  if (state.error || state.final) return false
+  if (state.stopping || state.reconnecting) return true
+  if (state.error) return false
   const phase = state.status?.state
   if (phase === "failed" || phase === "cancelled") return false
+  // Color marks final as soon as science lands (preview/PNG are separate). The
+  // engine job is done then; keepalive only. Composite stays busy until tiles land.
+  if (state.final && phase === "done") return false
+  if (state.final && !phase) return false
   return true
 }
 

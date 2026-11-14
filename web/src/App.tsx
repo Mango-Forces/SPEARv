@@ -154,14 +154,16 @@ function ValidViewApp({ view }: { view: View }) {
   // the field, changing a mode or release, or editing the colour recipe retires
   // the armed run and shows Find again.
   const armed = find?.key === colorViewKey
-  const finding = armed && activeRaw.mosaicBusy
+  // Stop for the whole armed engine job, including cancel drain. Before SkyShell
+  // has published once, treat the armed run as busy so Find does not flash back.
+  const finding = armed && (rawControls ? rawControls.mosaicBusy : true)
   const findNow = (next: View) => {
     findRun.current += 1
     setFind({ key: scienceViewKey(next, next.colour ?? DEFAULT_COLOUR_CONFIG), run: findRun.current })
   }
   const stopFinding = () => {
+    // Do not clear `find` here: stop() keeps mosaicBusy until DELETE finishes.
     activeRaw.stopMosaic()
-    setFind(null)
   }
 
   // A narrow header is a rail. Show a control only while content remains to
@@ -832,7 +834,7 @@ function SkyShell(props: {
   const rawColorBlob = raw.colorDisplay?.fullBlob
   const rawColorRetry = raw.colorDisplay?.retry
   const displayKey = JSON.stringify(props.display)
-  const mosaicBusy = props.armed && isBusy(mosaic) && !mosaic.final
+  const mosaicBusy = props.armed && isBusy(mosaic)
   useEffect(() => {
     props.onRawState({
       state: raw.state,
@@ -846,7 +848,7 @@ function SkyShell(props: {
       mosaicBusy,
       stopMosaic: mosaic.stop,
     })
-  }, [props.onRawState, props.rawEnabled, rawStateKey, rawGateKey, raw.metadata, rawColorKey, rawColorBlob, rawColorRetry, scienceViewKey(view, props.colour), displayKey, raw.start, raw.cancel, mosaicBusy, mosaic.stop])
+  }, [props.onRawState, props.rawEnabled, rawStateKey, rawGateKey, raw.metadata, rawColorKey, rawColorBlob, rawColorRetry, scienceViewKey(view, props.colour), displayKey, raw.start, raw.cancel, mosaicBusy, mosaic.stop, mosaic.stopping])
 
   // The clicked pixel is the rendered-grid index. Resolve its sky with the same
   // north-up TAN projection the server uses, so the panel can show the readout
