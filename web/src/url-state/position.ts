@@ -103,7 +103,7 @@ function decFromParts(negative: boolean, degrees: number, minutes: number, secon
   return negative ? -value : value
 }
 
-/** The field-of-view cap the mosaic painter can honestly stitch. */
+/** Maximum field of view (degrees) the mosaic painter supports. */
 export function parseFov(input: string): number | undefined {
   const text = normalize(input).replace(/\s*°$/, "")
   if (text === "") return undefined

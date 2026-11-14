@@ -194,7 +194,7 @@ export function CompositeDisplayControls(props: DisplayControlsProps) {
     <section className="raw-display">
       <RawLoadNotice {...props} />
       <fieldset disabled={!!props.disabledReason}>
-        <legend>Local display — values unchanged</legend>
+        <legend>Local display (values unchanged)</legend>
         <ToneControls
           label="Composite"
           value={props.display.composite}

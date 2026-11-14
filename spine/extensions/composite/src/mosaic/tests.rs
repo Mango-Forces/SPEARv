@@ -785,7 +785,7 @@ fn raw_activity_keeps_reads_alive_but_does_not_pin_lru() {
     assert_eq!(first.raw_metadata(), Err(StatusCode::CONFLICT));
     assert!(!first.abandoned());
     assert_eq!(first.polled_at(), old, "raw activity is not an LRU status poll");
-    // Capacity full of warm runners except first has the coldest poll — next insert drops it.
+    // Capacity full of warm runners except first has the coldest poll; next insert drops it.
     let (_e, _) = insert(&jobs, "e", grid(), 0, (grey_recipe(40), true));
     assert!(jobs.find(&first.id).is_none(), "the oldest status-polled job is still evicted");
 }

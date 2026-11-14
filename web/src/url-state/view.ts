@@ -257,7 +257,7 @@ export function readView(search: string): View {
 /** Read the URL once, before the first render. Starting from `DEFAULTS` and
  * replacing the snapshot in `subscribe` would render the default view first and
  * fire a request for it before the URL's view replaced it. */
-// The root is the colour showpiece. A copied link always carries its own
+// The root page defaults to colour mode. A copied link always carries its own
 // parameters, so only the bare page redirects.
 if (typeof window !== "undefined" && (window.location.search === "" || window.location.search === "?")) {
   window.history.replaceState(null, "", "/?ra=56.75&dec=24.12&fov_l=1&fov_h=1&mode=color&mask=off")

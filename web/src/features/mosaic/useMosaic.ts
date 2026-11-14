@@ -86,7 +86,7 @@ type BoxSpec = { channel: number; color: string; label: string }
  * failed or outdated fetch is simply fetched again. Color's progressive
  * channel layers use bounded backing; the final display and export come from
  * server-rendered revisions after science is done. Composite keeps its CPU
- * raw-layer path. A delta cannot be layered honestly, so its two boxes walk
+ * raw-layer path. A delta cannot be split into channel layers, so its two boxes walk
  * tiles, only as far as tiles have settled, and only settled tiles are shown.
  * Leaving the view aborts polling, animation frames and fetches. */
 export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS): MosaicState {
@@ -384,7 +384,7 @@ async function follow(
       try {
         await readStatus(since)
       } catch {
-        /* engine lost — useMosaic reconnect path owns recovery on next view */
+        /* engine lost; useMosaic reconnect path owns recovery on next view */
       }
     }
     const schedule = () => {
@@ -693,7 +693,7 @@ export function statusText(state: MosaicState): string {
 }
 
 function channelText(status: MosaicStatus): string {
-  const percent = (done: number, total: number) => (total > 0 ? `${Math.round((Math.min(done, total) / total) * 100)}%` : "—")
+  const percent = (done: number, total: number) => (total > 0 ? `${Math.round((Math.min(done, total) / total) * 100)}%` : "-")
   const done = status.channels_done ?? []
   const total = status.channels_total ?? []
   // Channels run blue, green, red; the line reads R, G, B.

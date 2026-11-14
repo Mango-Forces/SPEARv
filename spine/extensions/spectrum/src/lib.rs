@@ -316,7 +316,7 @@ async fn spectrum(
             })
         })
         .collect();
-    // No hit is an honest empty spectrum, not a reason to skip the reduction.
+    // No hit produces an empty spectrum; still run the reduction.
     let points = if samples.is_empty() {
         Vec::new()
     } else {

@@ -1314,7 +1314,7 @@ impl Job {
     /// own gun only: red paints `[shade, 0, 0]`. A pixel this channel has no
     /// data for stays black, which adds nothing under `lighter`, so the three
     /// layers add up to the RGB tile. Grey returns its one full layer; a delta
-    /// cannot be layered honestly, so it returns the whole tile.
+    /// cannot be split by channel, so it returns the whole tile.
     fn tile_layer(&self, channel: usize, x: u32, y: u32) -> Option<(u32, u32, Vec<u8>)> {
         if channel >= self.recipe.channels.len() || x >= self.cols || y >= self.rows {
             return None;

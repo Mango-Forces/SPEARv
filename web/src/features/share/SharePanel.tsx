@@ -25,7 +25,7 @@ export function SharePanel(props: {
   view: View
   release?: string
   gate?: RenderGate
-  /** Color/Composite raw-layer session — drives export hold-up progress. */
+  /** Color/Composite raw-layer session; drives export hold-up progress. */
   rawSession?: RawSessionState
   /** Bytes estimate when known (from metadata), for the hold-up copy. */
   rawBytes?: number
@@ -351,7 +351,7 @@ function ExportHoldup(props: {
   if (!props.ready) {
     return (
       <p role="status" className="share-status">
-        No rendered image yet — wait for the mosaic to finish painting.
+        No rendered image yet. Wait for the mosaic to finish painting.
       </p>
     )
   }
@@ -384,7 +384,7 @@ function ExportHoldup(props: {
           <div className="share-progress-bar" style={{ width: `${pct}%` }} />
         </div>
         <p className="share-holdup-hint">
-          Export stays locked until every layer tile is in memory and mixed — that is the picture Download will save. Keep this tab open; leaving abandons the job.
+          Export stays locked until every layer tile is in memory and mixed; that is the picture Download will save. Keep this tab open, because leaving abandons the job.
         </p>
       </div>
     )
@@ -393,7 +393,7 @@ function ExportHoldup(props: {
   if (phase === "unavailable" && session && "reason" in session) {
     return (
       <div className="share-holdup" role="alert">
-        <p className="share-holdup-title">Local layers failed — download is blocked</p>
+        <p className="share-holdup-title">Local layers failed; download is blocked</p>
         <p className="share-holdup-detail">{session.reason}</p>
         {props.onRetry ? (
           <button type="button" className="share-primary" onClick={props.onRetry}>
@@ -413,7 +413,7 @@ function ExportHoldup(props: {
       <div className="share-holdup" role="status">
         <p className="share-holdup-title">Local layers not loaded yet</p>
         <p className="share-holdup-detail">
-          About {need >= 1024 ? `${(need / 1024).toFixed(1)} GiB` : `${need.toFixed(0)} MiB`} — start the download from Colour/Composite display, then return here.
+          About {need >= 1024 ? `${(need / 1024).toFixed(1)} GiB` : `${need.toFixed(0)} MiB`}. Start the download from Colour/Composite display, then return here.
         </p>
       </div>
     )

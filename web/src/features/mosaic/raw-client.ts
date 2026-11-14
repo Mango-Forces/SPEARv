@@ -61,7 +61,7 @@ export class RawClient {
       catch { throw new RawFailure("bad-metadata", "Raw metadata does not match this completed mosaic.") }
       if (this.dead || this.ac.signal.aborted || session !== this.session) return
       this.publish({ metadata, ...(metadata.source_recipe.mode === "color"
-        ? { gate: { ...serverGate(false), label: "Loading three color layers — export waits for them" } }
+        ? { gate: { ...serverGate(false), label: "Loading three color layers; export waits for them" } }
         : {}) })
       if (metadata.source_recipe.mode !== "color" && metadata.width * metadata.height > AUTO_RAW_PIXELS) {
         this.publish({ state: { phase: "awaiting-opt-in", estimateBytes: rawBytes(metadata) } }); return
@@ -98,7 +98,7 @@ export class RawClient {
     worker.onerror = () => this.fail(new RawFailure("worker", "Local editing is unavailable in this browser."), session)
     worker.postMessage({ type: "init", session, metadata })
     this.publish({ state: { phase: "loading", loadedTiles: 0, totalTiles: cols * rows },
-      gate: { ...this.snapshot.gate, exportReady: false, label: "Loading raw layers — export waits" } })
+      gate: { ...this.snapshot.gate, exportReady: false, label: "Loading raw layers; export waits" } })
     let cursor = 0
     const fetchNext = async () => {
       while (cursor < count && !signal.aborted && !this.dead && session === this.session) {
@@ -129,7 +129,7 @@ export class RawClient {
     if (!this.worker || !this.snapshot.metadata) return
     const revision = ++this.revision
     this.publish({ gate: { ...this.snapshot.gate, exportReady: false, remapBusy: true, pendingRevision: revision,
-      label: "Updating image — export is available when the update finishes" } })
+      label: "Updating image; export is available when the update finishes" } })
     this.worker.postMessage({ type: "render", session: this.session, revision, display: resolveDisplay(this.display, this.snapshot.metadata) })
   }
   private receive(message: FromRawWorker) {
@@ -144,8 +144,8 @@ export class RawClient {
           ...this.snapshot.gate,
           exportReady: false,
           label: total > 0
-            ? `Loading raw layers ${loaded}/${total} tiles (${pct}%) — export waits`
-            : "Loading raw layers — export waits",
+            ? `Loading raw layers ${loaded}/${total} tiles (${pct}%); export waits`
+            : "Loading raw layers; export waits",
         },
       })
       return
@@ -167,13 +167,13 @@ export class RawClient {
     if (this.dead || session !== this.session || this.ac.signal.aborted) return
     const interrupted = this.snapshot.gate.remapBusy
     this.stop()
-    const detail = error instanceof RawFailure && error.code === "http-404" ? "Raw layers unavailable — the job is no longer on the server."
+    const detail = error instanceof RawFailure && error.code === "http-404" ? "Raw layers unavailable: the job is no longer on the server."
       : error instanceof RawFailure && (error.code === "http-409" || error.code === "http-410") ? "Raw layers are not available for this mosaic."
       : error instanceof Error ? error.message : "Local editing is unavailable in this browser."
     this.publish({ state: { phase: "unavailable", reason: interrupted
       ? `${detail} Export waits for a complete retry.`
       : `${detail} The server image is unchanged.` },
-      ...(interrupted ? { gate: { ...this.snapshot.gate, exportReady: false, remapBusy: true, label: "Local layers unavailable — export waits for a complete retry" } } : this.serverImageGate()) })
+      ...(interrupted ? { gate: { ...this.snapshot.gate, exportReady: false, remapBusy: true, label: "Local layers unavailable; export waits for a complete retry" } } : this.serverImageGate()) })
   }
   /** Loading closes export, but nothing reaches the canvas before the first
    * render. A stopped load that never painted leaves the completed Composite

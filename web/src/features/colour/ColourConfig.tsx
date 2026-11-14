@@ -48,6 +48,6 @@ export function ColourConfig(props: {
     </div>)}
     {error ? <p className="colour-error" role="alert">{error}</p> : null}
     <div className="colour-actions"><button type="button" onClick={apply}>Apply bands</button></div>
-    <p className="colour-note">Apply anytime — dumps an in-flight mosaic and starts a new one with these band windows.</p>
+    <p className="colour-note">Apply anytime: dumps an in-flight mosaic and starts a new one with these band windows.</p>
   </fieldset>
 }

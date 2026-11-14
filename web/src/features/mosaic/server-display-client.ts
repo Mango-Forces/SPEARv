@@ -364,7 +364,7 @@ export class ServerDisplayClient {
       fullUrl: undefined,
       fullBlob: undefined,
       error: message,
-      gate: { ...CLOSED_GATE, label: "Server PNG expired — retry the current display" },
+      gate: { ...CLOSED_GATE, label: "Server PNG expired; retry the current display" },
     })
   }
 
@@ -387,7 +387,7 @@ export class ServerDisplayClient {
       ...this.snapshot,
       phase: "failed",
       error: errorText(error),
-      gate: { ...CLOSED_GATE, label: "Server PNG failed — retry the current display" },
+      gate: { ...CLOSED_GATE, label: "Server PNG failed; retry the current display" },
     })
   }
 
