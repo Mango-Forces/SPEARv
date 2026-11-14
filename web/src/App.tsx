@@ -358,7 +358,15 @@ function ValidViewApp({ view }: { view: View }) {
     }
     const fovH = draftLinked ? fovL : parsedH
     setFormError(undefined)
-    const next = { ...view, ra, dec, fovL, fovH, fovLinked: draftLinked }
+    // Snap to URL precision so Find's armed key matches the committed view.
+    const next = {
+      ...view,
+      ra: Number(ra.toFixed(6)),
+      dec: Number(dec.toFixed(6)),
+      fovL: Number(fovL.toFixed(6)),
+      fovH: Number(fovH.toFixed(6)),
+      fovLinked: draftLinked,
+    }
     commit(next)
     findNow(next)
   }
@@ -752,11 +760,14 @@ function ValidViewApp({ view }: { view: View }) {
 }
 
 function scienceViewKey(view: View, colour: ColourConfigValue): string {
+  // Six-decimal sky values, same as the URL. Draft parse → Number can inject
+  // binary noise (133.79513 → 133.79512999999997); without rounding Find arms
+  // on a key that never matches the live view and the mosaic never starts.
   return JSON.stringify({
-    ra: view.ra,
-    dec: view.dec,
-    fovL: view.fovL,
-    fovH: view.fovH,
+    ra: Number(view.ra.toFixed(6)),
+    dec: Number(view.dec.toFixed(6)),
+    fovL: Number(view.fovL.toFixed(6)),
+    fovH: Number(view.fovH.toFixed(6)),
     dr: view.dr,
     mask: view.mask,
     color: view.color,
