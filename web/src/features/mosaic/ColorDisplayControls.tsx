@@ -113,10 +113,10 @@ function ColorDisplayStatus(props: { display: ColorDisplayView | undefined }) {
   if (state.phase === "queued") return <p className="raw-note" role="status">Settings queued while science builds. They will be sent after the completed channel values are ready.</p>
   if (state.phase === "creating") return <p className="raw-note" role="status">{state.gate.label}</p>
   if (state.phase === "rendering") return <p className="raw-note" role="status">{state.gate.label}</p>
-  if (state.phase === "ready") return <p className="raw-note" role="status">{state.error ? `${state.error} ` : ""}Current server-rendered PNG is ready. Color export saves these exact PNG bytes.</p>
+  if (state.phase === "ready") return <p className="raw-note" role="status">Current server-rendered PNG is ready. Color export saves these exact PNG bytes.</p>
   if (state.phase === "failed" || state.phase === "expired") return <div className="raw-load" role="alert">
     <p className="raw-error">{state.error ?? state.gate.label}</p>
-    <button type="button" onClick={state.retry}>Retry current display</button>
+    <button type="button" onClick={state.retry}>Try again</button>
   </div>
   return null
 }

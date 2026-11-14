@@ -8,7 +8,7 @@ import { serverGate } from "./raw-client"
 type BoundSnapshot = ColorDisplaySnapshot & { viewKey: string }
 export type ColorDisplayView = BoundSnapshot & { retry: () => void }
 
-export function useColorDisplay(mosaic: MosaicState, display: DisplayState, enabled: boolean, viewKey: string): ColorDisplayView {
+export function useColorDisplay(mosaic: MosaicState, display: DisplayState, enabled: boolean, viewKey: string, onLostJob?: () => void): ColorDisplayView {
   const client = useRef<ServerDisplayClient | null>(null)
   const [snapshot, setSnapshot] = useState<BoundSnapshot>()
   const info = mosaic.mosaic?.info
@@ -38,6 +38,9 @@ export function useColorDisplay(mosaic: MosaicState, display: DisplayState, enab
       { jobId: info.id, width: info.width, height: info.height },
       display,
       (next) => setSnapshot({ ...next, viewKey }),
+      undefined,
+      undefined,
+      onLostJob,
     )
     client.current = current
     current.prepare()
@@ -45,7 +48,7 @@ export function useColorDisplay(mosaic: MosaicState, display: DisplayState, enab
       current.dispose()
       if (client.current === current) client.current = null
     }
-  }, [enabled, final, info?.id, info?.width, info?.height, mosaic.finalRevision, viewKey])
+  }, [enabled, final, info?.id, info?.width, info?.height, mosaic.finalRevision, viewKey, onLostJob])
 
   useLayoutEffect(() => {
     client.current?.setDisplay(display)

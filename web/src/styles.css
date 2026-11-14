@@ -17,9 +17,11 @@
   --text: #e8eaec;
   --text-2: #a7adb3;
   --text-3: #7d848b;
-  --accent: #c6ff2e;
-  --accent-ink: #0a0c03;
-  --danger: #e39a8f;
+  /* NASA identity palette on trial: red primary, blue secondary. */
+  --accent: #e4002b;
+  --accent-ink: #ffffff;
+  --accent-blue: #0032a0;
+  --danger: #e4002b;
   --warn: #d9b779;
   --sans: "Google Sans", "Product Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -258,9 +260,17 @@ summary:focus-visible {
 
 .topbar .show:hover:not(:disabled),
 .location .fov-chain[aria-pressed="true"]:hover:not(:disabled) {
-  border-color: #d4ff5c;
-  background: #d4ff5c;
+  border-color: #ff1a45;
+  background: #ff1a45;
   color: var(--accent-ink);
+}
+
+/* Stop is its own action, not a hover state of Find. NASA blue while running. */
+.topbar .show--stop,
+.topbar .show--stop:hover:not(:disabled) {
+  border-color: var(--accent-blue);
+  background: var(--accent-blue);
+  color: #ffffff;
 }
 
 /* Conditional form error: one inline message, no permanent second row. */
@@ -479,6 +489,11 @@ summary:focus-visible {
   gap: 8px;
   color: var(--text-2);
   font-size: 13px;
+}
+
+.empty-find {
+  color: var(--text-2);
+  font-size: 13.5px;
 }
 
 .rendering::before {

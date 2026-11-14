@@ -1,12 +1,14 @@
 // @ts-nocheck
-import { test } from "node:test"
+import { beforeEach, test } from "node:test"
 import assert from "node:assert/strict"
 import { DEFAULT_DISPLAY } from "../../url-state/display.ts"
-import { ServerDisplayClient } from "./server-display-client.ts"
+import { clearCachedPngs, ServerDisplayClient } from "./server-display-client.ts"
 import { isColorImage } from "./color-export-mode.ts"
 
 const PNG = png(1, 1)
 const TIMINGS = { previewDebounceMs: 5, fullDebounceMs: 15, pollMs: 5 }
+
+beforeEach(() => clearCachedPngs())
 
 test("Color export never replaces Specific canvas export", () => {
   assert.equal(isColorImage({ color: true, mode: "specific" }), false)
@@ -88,21 +90,22 @@ test("keeps the verified Blob through transient status loss", async () => {
   const options = { offline: false }
   let resolveReady
   const ready = new Promise((resolve) => { resolveReady = resolve })
-  let resolveOffline
-  const offline = new Promise((resolve) => { resolveOffline = resolve })
+  const snapshots = []
   const client = new ServerDisplayClient({ jobId: "fixture", width: 1, height: 1 }, DEFAULT_DISPLAY, (snapshot) => {
+    snapshots.push(snapshot)
     if (snapshot.fullBlob && !snapshot.error) resolveReady(snapshot)
-    if (snapshot.fullBlob && snapshot.error) resolveOffline(snapshot)
   }, fixture([], options), TIMINGS)
   try {
     client.prepare()
     const downloaded = await ready
     options.offline = true
-    const afterDisconnect = await offline
-    assert.equal(afterDisconnect.phase, "ready")
-    assert.equal(afterDisconnect.fullBlob, downloaded.fullBlob)
-    assert.equal(afterDisconnect.gate.exportReady, true)
-    assert.match(afterDisconnect.error, /offline/)
+    // Once the PNG is cached, later status failures never reopen the gate or drop it.
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const after = client.getSnapshot()
+    assert.equal(after.phase, "ready")
+    assert.equal(after.fullBlob, downloaded.fullBlob)
+    assert.equal(after.gate.exportReady, true)
+    assert.equal(after.error, undefined)
   } finally {
     client.dispose()
   }
@@ -116,11 +119,12 @@ test("a no-longer-current server revision does not invalidate the verified local
     client.prepare()
     const ready = await waitFor(snapshots, (snapshot) => !!snapshot.fullBlob && !snapshot.error)
     options.current = false
-    const stale = await waitFor(snapshots, (snapshot) => !!snapshot.fullBlob && !!snapshot.error && /no longer lists/.test(snapshot.error))
-    assert.equal(stale.phase, "ready")
-    assert.equal(stale.fullBlob, ready.fullBlob)
-    assert.equal(stale.gate.exportReady, true)
-    assert.match(stale.error, /cached current PNG remains available/)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const after = client.getSnapshot()
+    assert.equal(after.phase, "ready")
+    assert.equal(after.fullBlob, ready.fullBlob)
+    assert.equal(after.gate.exportReady, true)
+    assert.equal(after.error, undefined)
   } finally {
     client.dispose()
   }
@@ -139,12 +143,63 @@ test("requestFull failure and retry keep a verified Blob and open gate", async (
     const retrying = client.getSnapshot()
     assert.equal(retrying.fullBlob, ready.fullBlob)
     assert.equal(retrying.gate.exportReady, true)
-    const failed = await waitFor(snapshots, (snapshot) => !!snapshot.fullBlob && /full request failed/.test(snapshot.error ?? ""))
-    assert.equal(failed.phase, "ready")
-    assert.equal(failed.fullBlob, ready.fullBlob)
-    assert.equal(failed.gate.exportReady, true)
+    assert.equal(retrying.phase, "ready")
+    assert.equal(retrying.error, undefined)
   } finally {
     client.dispose()
+  }
+})
+
+test("evicted revision recovers by re-creating instead of dead-ending", async () => {
+  let posts = 0
+  let display
+  const snapshots = []
+  const client = new ServerDisplayClient({ jobId: "fixture", width: 1, height: 1 }, DEFAULT_DISPLAY, (snapshot) => snapshots.push(snapshot), async (input, init = {}) => {
+    const path = new URL(String(input), "http://fixture").pathname
+    const method = init.method ?? "GET"
+    if (path.endsWith("/display-revisions") && method === "POST") {
+      posts++
+      display = JSON.parse(init.body)
+      return Response.json(manifest(display, true, { revision: `d${posts}` }), { status: 201 })
+    }
+    if (path.includes("/display-revisions/d") && path.endsWith("/status")) {
+      if (posts === 1) return errorResponse(410, "gone")
+      return Response.json(manifest(display, true, { revision: `d${posts}` }))
+    }
+    if (path.includes("/display-revisions/d") && path.endsWith("/full") && method === "POST") {
+      return Response.json(manifest(display, true, { revision: `d${posts}` }), { status: 202 })
+    }
+    if (path.endsWith("/preview.png") || path.endsWith("/full.png")) return pngResponse(PNG)
+    throw new Error(`Unexpected ${method} ${path}`)
+  }, TIMINGS)
+  try {
+    client.prepare()
+    const ready = await waitFor(snapshots, (snapshot) => !!snapshot.fullBlob && snapshot.phase === "ready")
+    assert.equal(ready.gate.exportReady, true)
+    assert.ok(posts >= 2)
+  } finally {
+    client.dispose()
+  }
+})
+
+test("cached PNG survives a brand-new client for the same job and settings", async () => {
+  const requests = []
+  const first = new ServerDisplayClient({ jobId: "fixture", width: 1, height: 1 }, DEFAULT_DISPLAY, () => {}, fixture(requests), TIMINGS)
+  try {
+    first.prepare()
+    await until(() => !!first.getSnapshot().fullBlob)
+  } finally {
+    first.dispose()
+  }
+  const before = requests.length
+  const second = new ServerDisplayClient({ jobId: "fixture", width: 1, height: 1 }, DEFAULT_DISPLAY, () => {}, fixture(requests), TIMINGS)
+  try {
+    second.prepare()
+    assert.equal(!!second.getSnapshot().fullBlob, true)
+    assert.equal(second.getSnapshot().gate.exportReady, true)
+    assert.equal(requests.length, before)
+  } finally {
+    second.dispose()
   }
 })
 

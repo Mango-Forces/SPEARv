@@ -73,6 +73,7 @@ impl Extension for Composite {
             .routes(routes!(releases))
             .routes(routes!(mosaic::start))
             .routes(routes!(mosaic::status))
+            .routes(routes!(mosaic::cancel))
             .routes(routes!(mosaic::raw_metadata))
             .routes(routes!(mosaic::tile))
             .routes(routes!(mosaic::display_revision::create))

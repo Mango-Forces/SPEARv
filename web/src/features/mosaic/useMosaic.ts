@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { client } from "../../api"
 import type { components } from "../../bindings/schema"
 import { DEFAULT_COLOUR_BANDS, type ColourBands } from "../../url-state/colour"
@@ -33,6 +33,10 @@ export type MosaicState = {
   /** The engine went away mid-job, so the view is waiting to start it again. */
   reconnecting?: boolean
   error?: string
+  /** Stop the job on this page and on the engine, leaving nothing running. */
+  stop: () => void
+  /** Run this view again under a fresh job, without a second Find click. */
+  restart: () => void
 }
 
 const POLL_MS = 500
@@ -57,7 +61,16 @@ const GLIDE_STEP = 6
 const FINAL_ATTEMPTS = 3
 const COLOR_PROGRESSIVE_EDGE = 1024
 const RECONNECT_MS = 1000
-const IDLE: MosaicState = { frontier: [], arrived: 0, pathLength: 0, drawing: 0, undrawn: 0, final: false }
+const IDLE: MosaicState = {
+  frontier: [],
+  arrived: 0,
+  pathLength: 0,
+  drawing: 0,
+  undrawn: 0,
+  final: false,
+  stop: () => undefined,
+  restart: () => undefined,
+}
 
 const BOX_COLORS = [
   { channel: 2, color: "#ef4444", label: "R" },
@@ -73,8 +86,10 @@ class EngineLost extends Error {}
 
 type BoxSpec = { channel: number; color: string; label: string }
 
-/** Starts or joins the job for this view and paints it layer by layer. One
- * box per channel walks the full spiral the server reports, from the
+/** Starts or joins the job for this view and paints it layer by layer. It does
+ * nothing until `enabled` is true, which only a Find click sets, so loading a
+ * link or changing a control never starts engine work on its own. One box per
+ * channel walks the full spiral the server reports, from the
  * top-left tile to the centre. A box stands on the tile its channel is filling
  * and moves only when the server says that tile is finished and the finished
  * tile is on the canvas, so what is behind a box is complete on screen. The tile
@@ -89,8 +104,10 @@ type BoxSpec = { channel: number; color: string; label: string }
  * raw-layer path. A delta cannot be split into channel layers, so its two boxes walk
  * tiles, only as far as tiles have settled, and only settled tiles are shown.
  * Leaving the view aborts polling, animation frames and fetches. */
-export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS): MosaicState {
+export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS, enabled = false, run = 0): MosaicState {
   const [state, setState] = useState<MosaicState>(IDLE)
+  const [restarts, setRestarts] = useState(0)
+  const control = useRef<{ ac?: AbortController; jobId?: string }>({})
   const { ra, dec, fovL, fovH, dr, mask, color, mode } = view
   const pinKey = view.pins.map(formatPin).join("&")
   // The colour recipe is part of the job identity: a different mapping must ask
@@ -98,8 +115,14 @@ export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS)
   const bandsKey = color ? `${bands.r.pin}:${bands.r.width}:${bands.g.pin}:${bands.g.width}:${bands.b.pin}:${bands.b.width}` : ""
 
   useEffect(() => {
+    if (!enabled) {
+      setState(IDLE)
+      return
+    }
     setState(IDLE)
     const ac = new AbortController()
+    control.current.ac = ac
+    control.current.jobId = undefined
     const update = (next: Partial<MosaicState>) => {
       if (!ac.signal.aborted) setState((state) => ({ ...state, ...next }))
     }
@@ -126,8 +149,11 @@ export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS)
         : {}),
     }
     let timer = 0
+    const joined = (id: string) => {
+      if (!ac.signal.aborted) control.current.jobId = id
+    }
     const start = () => {
-      follow(query, ac.signal, update).catch((err: unknown) => {
+      follow(query, ac.signal, update, joined).catch((err: unknown) => {
         if (ac.signal.aborted) return
         if (!(err instanceof EngineLost)) return update({ error: err instanceof Error ? err.message : "the mosaic failed" })
         setState({ ...IDLE, reconnecting: true })
@@ -138,10 +164,33 @@ export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS)
     return () => {
       window.clearTimeout(timer)
       ac.abort()
+      if (control.current.ac === ac) {
+        control.current.ac = undefined
+        control.current.jobId = undefined
+      }
     }
-  }, [ra, dec, fovL, fovH, dr, mask, color, mode, pinKey, bandsKey])
+  }, [enabled, run, restarts, ra, dec, fovL, fovH, dr, mask, color, mode, pinKey, bandsKey])
 
-  return state
+  const stop = useCallback(() => {
+    const { ac, jobId } = control.current
+    control.current.ac = undefined
+    control.current.jobId = undefined
+    ac?.abort()
+    setState(IDLE)
+    if (jobId) void cancelJob(jobId)
+  }, [])
+  const restart = useCallback(() => setRestarts((count) => count + 1), [])
+
+  return { ...state, stop, restart }
+}
+
+/** Stop the engine job as well as this page, so nothing keeps reading files. */
+async function cancelJob(id: string) {
+  try {
+    await fetch(`/api/v1/mosaic/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true })
+  } catch {
+    // A vanished engine already has nothing left to cancel.
+  }
 }
 
 async function follow(
@@ -164,11 +213,13 @@ async function follow(
   },
   signal: AbortSignal,
   update: (next: Partial<MosaicState>) => void,
+  joined: (id: string) => void,
 ) {
   const started = await reach(client.GET("/api/v1/mosaic", { params: { query }, signal }), signal)
   if (started.response.status >= 500) throw new EngineLost()
   if (!started.data) throw new Error(serverError(started.error) ?? `the mosaic did not start (${started.response.status})`)
   const info = started.data
+  joined(info.id)
   update({ reconnecting: false })
   const canvas = document.createElement("canvas")
   const color = query.color === "1"

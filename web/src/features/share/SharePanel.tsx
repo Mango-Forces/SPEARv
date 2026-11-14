@@ -301,32 +301,31 @@ function ColorExportStatus(props: { display: ColorDisplayView | undefined; curre
   const display = props.display
   if (!display || !props.current) return <p role="status" className="share-status">Waiting for the current Color display. An older view cannot be downloaded.</p>
   if (display.phase === "queued") return <p role="status" className="share-status">Color settings are queued until science finishes.</p>
-  if (display.phase === "failed" || display.phase === "expired") return <div className="share-holdup" role="alert">
-    <p className="share-holdup-title">The current Color PNG is unavailable</p>
-    <p className="share-holdup-detail">{display.error ?? display.gate.label}</p>
-    <button type="button" className="share-primary" onClick={display.retry}>Retry current PNG</button>
-  </div>
-  if (display.fullBlob && display.gate.exportReady) return <p role="status" className="share-status share-status--ok">{display.error ? `${display.error} ` : ""}The exact current full-resolution server PNG is ready to download.</p>
+  if (display.fullBlob && display.gate.exportReady) return <p role="status" className="share-status share-status--ok">The exact current full-resolution server PNG is ready to download.</p>
   const full = display.manifest?.full
   const total = full?.total_rows ?? 0
   const completed = Math.min(full?.completed_rows ?? 0, total)
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0
-  const detail = full?.state === "not_requested"
-    ? "The full PNG will be requested after display settings settle."
-    : full?.state === "queued"
-      ? "The full PNG is queued on the server."
-      : full?.state === "ready"
-        ? "The full PNG is ready; verifying its bytes and dimensions."
-        : total > 0
-          ? `Server render progress · ${completed.toLocaleString("en-US")} / ${total.toLocaleString("en-US")} rows (${percent}%)`
-          : display.gate.label
+  const failed = display.phase === "failed" || display.phase === "expired"
+  const detail = failed
+    ? display.error ?? display.gate.label
+    : full?.state === "not_requested"
+      ? "The full PNG will be requested after display settings settle."
+      : full?.state === "queued"
+        ? "The full PNG is queued on the server."
+        : full?.state === "ready"
+          ? "The full PNG is ready; verifying its bytes and dimensions."
+          : total > 0
+            ? `Server render progress · ${completed.toLocaleString("en-US")} / ${total.toLocaleString("en-US")} rows (${percent}%)`
+            : display.gate.label
   return <div className="share-holdup" role="status" aria-live="polite">
     <p className="share-holdup-title">Preparing the original full-resolution Color PNG</p>
-    <p className="share-holdup-detail">{display.error ?? detail}</p>
-    {total > 0 && (full?.state === "queued" || full?.state === "rendering") ? <div className="share-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label="Full Color PNG render progress">
+    <p className="share-holdup-detail">{detail}</p>
+    {!failed && total > 0 && (full?.state === "queued" || full?.state === "rendering") ? <div className="share-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label="Full Color PNG render progress">
       <div className="share-progress-bar" style={{ width: `${percent}%` }} />
     </div> : null}
-    <p className="share-holdup-hint">The full PNG is fetched and verified before Download is enabled. This remains the original image, not the bounded on-screen preview.</p>
+    {failed ? <button type="button" className="share-primary" onClick={display.retry}>Try again</button> : null}
+    <p className="share-holdup-hint">The full PNG is fetched and verified before Download is enabled. It stays cached in this page once complete, even if the server later drops the job.</p>
   </div>
 }
 

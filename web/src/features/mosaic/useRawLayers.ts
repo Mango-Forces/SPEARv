@@ -20,7 +20,7 @@ export type RawLayersView = {
 }
 
 /** Composite keeps its opt-in CPU raw layers; Color consumes server revisions. */
-export function useRawLayers(mosaic: MosaicState, display: DisplayState, enabled = true, colorHint = false, viewKey = ""): RawLayersView {
+export function useRawLayers(mosaic: MosaicState, display: DisplayState, enabled = true, colorHint = false, viewKey = "", onLostJob?: () => void): RawLayersView {
   const [snapshot, setSnapshot] = useState<RawSnapshot>({ state: { phase: "idle" }, metadata: null, gate: serverGate(false) })
   const client = useRef<RawClient | null>(null)
   const owner = useRef<HTMLCanvasElement | null>(null)
@@ -33,7 +33,7 @@ export function useRawLayers(mosaic: MosaicState, display: DisplayState, enabled
   const channels = mosaic.status?.channels_total.length
   const color = colorHint || channels === 3
   const final = mosaic.final && mosaic.status?.state === "done" && (mosaic.finalRevision ?? 0) > 0
-  const colorDisplay = useColorDisplay(mosaic, normalized, enabled && color, viewKey)
+  const colorDisplay = useColorDisplay(mosaic, normalized, enabled && color, viewKey, onLostJob)
   const pendingGate = serverGate(false)
 
   useEffect(() => {

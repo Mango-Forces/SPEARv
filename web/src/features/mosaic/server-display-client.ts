@@ -30,6 +30,11 @@ type Timings = { previewDebounceMs?: number; fullDebounceMs?: number; pollMs?: n
 const PREVIEW_DEBOUNCE_MS = 200
 const FULL_DEBOUNCE_MS = 1000
 const POLL_MS = 500
+/** Server PNGs kept verbatim in this page, so an evicted revision or a
+ * re-created display client can never lose a finished image. */
+const CACHE_LIMIT = 4
+const RECOVERY_ATTEMPTS = 4
+const RECOVERY_DELAY_MS = 250
 const CLOSED_GATE: RenderGate = {
   exportReady: false,
   remapBusy: false,
@@ -38,7 +43,51 @@ const CLOSED_GATE: RenderGate = {
   label: "Preparing the server PNG…",
 }
 
-/** Owns one job's display generations and the exact server PNG Blob for export. */
+type CachedPng = { blob: Blob; url: string; manifest?: DisplayManifest }
+
+const cachedPngs = new Map<string, CachedPng>()
+
+/** Test helper: drop every retained PNG between cases. */
+export function clearCachedPngs() {
+  for (const entry of cachedPngs.values()) URL.revokeObjectURL(entry.url)
+  cachedPngs.clear()
+}
+
+function pngCacheKey(jobId: string, settingsKey: string): string {
+  return `${jobId}\n${settingsKey}`
+}
+
+function cachedPng(key: string): CachedPng | undefined {
+  const hit = cachedPngs.get(key)
+  if (!hit) return undefined
+  cachedPngs.delete(key)
+  cachedPngs.set(key, hit)
+  return hit
+}
+
+function rememberPng(key: string, blob: Blob, manifest?: DisplayManifest): CachedPng {
+  const existing = cachedPngs.get(key)
+  if (existing) {
+    cachedPngs.delete(key)
+    cachedPngs.set(key, existing)
+    return existing
+  }
+  const entry = { blob, url: URL.createObjectURL(blob), manifest }
+  cachedPngs.set(key, entry)
+  while (cachedPngs.size > CACHE_LIMIT) {
+    const oldest = cachedPngs.keys().next().value
+    if (oldest === undefined) break
+    const gone = cachedPngs.get(oldest)
+    cachedPngs.delete(oldest)
+    if (gone) URL.revokeObjectURL(gone.url)
+  }
+  return entry
+}
+
+/** Owns one job's display generations and the exact server PNG Blob for export.
+ * A downloaded PNG is cached by job and display settings, so later server
+ * eviction, a re-created client or a retry reads the same bytes without asking
+ * the engine again. */
 export class ServerDisplayClient {
   private ac = new AbortController()
   private generation = 0
@@ -53,7 +102,8 @@ export class ServerDisplayClient {
   private fullTimer?: ReturnType<typeof setTimeout>
   private pollTimer?: ReturnType<typeof setTimeout>
   private previewUrl?: string
-  private fullUrl?: string
+  private recoveries = 0
+  private lostRequested = false
   private snapshot: ColorDisplaySnapshot
   private timings: Required<Timings>
 
@@ -63,6 +113,7 @@ export class ServerDisplayClient {
     private changed: (snapshot: ColorDisplaySnapshot) => void,
     private fetcher: DisplayFetcher = (input, init) => globalThis.fetch(input, init),
     timings: Timings = {},
+    private onLostJob?: () => void,
   ) {
     this.display = normalizeDisplay(display)
     this.timings = {
@@ -86,6 +137,11 @@ export class ServerDisplayClient {
 
   prepare() {
     if (this.dead) return
+    const cached = cachedPng(this.cacheKey())
+    if (cached) {
+      this.adopt(cached)
+      return
+    }
     this.schedule(this.display, true)
   }
 
@@ -98,21 +154,8 @@ export class ServerDisplayClient {
 
   retry() {
     if (this.dead) return
-    if (this.revision && this.snapshot.phase !== "expired") {
-      const cached = !!this.snapshot.fullBlob
-      this.fullRequested = false
-      this.fullFetchStarted = cached
-      this.previewFetchStarted = !!this.snapshot.previewUrl
-      this.publish({
-        ...this.snapshot,
-        phase: cached ? "ready" : "rendering",
-        error: undefined,
-        gate: cached
-          ? { ...this.snapshot.gate, exportReady: true, label: "Cached current server PNG remains available" }
-          : { ...CLOSED_GATE, label: "Retrying the current server PNG…" },
-      })
-      void this.requestFull(this.generation, this.revision)
-      void this.poll(this.generation, this.revision)
+    if (this.snapshot.fullBlob) {
+      this.settle(this.snapshot.fullBlob, this.snapshot.manifest)
       return
     }
     this.schedule(this.display, true)
@@ -137,6 +180,8 @@ export class ServerDisplayClient {
     this.releaseUrls()
     this.display = display
     this.revision = undefined
+    this.recoveries = 0
+    this.lostRequested = false
     this.fullDue = false
     this.fullRequested = false
     this.fullFetchStarted = false
@@ -154,12 +199,45 @@ export class ServerDisplayClient {
       fullBlob: undefined,
       gate: { ...CLOSED_GATE, label: "Sending display settings to the server…" },
     })
+    const cached = cachedPng(this.cacheKey())
+    if (cached) {
+      this.adopt(cached)
+      return
+    }
     this.previewTimer = setTimeout(() => void this.createRevision(generation), this.timings.previewDebounceMs)
     this.fullTimer = setTimeout(() => {
       if (!this.isCurrent(generation)) return
       this.fullDue = true
       if (this.revision) void this.requestFull(generation, this.revision)
     }, this.timings.fullDebounceMs)
+  }
+
+  /** Publish the cached PNG at once and ask the engine for nothing. */
+  private adopt(cached: CachedPng) {
+    this.revision = undefined
+    this.fullRequested = true
+    this.fullFetchStarted = true
+    this.previewFetchStarted = true
+    this.clearTimers()
+    this.publish(this.ready(cached.blob, cached.manifest, cached.url))
+  }
+
+  private ready(blob: Blob, manifest: DisplayManifest | undefined, url: string): ColorDisplaySnapshot {
+    return {
+      ...this.snapshot,
+      phase: "ready",
+      manifest,
+      fullUrl: url,
+      fullBlob: blob,
+      error: undefined,
+      gate: { exportReady: true, remapBusy: false, completedRevision: this.generation, pendingRevision: null, label: "Current server PNG is ready" },
+    }
+  }
+
+  private settle(blob: Blob, manifest: DisplayManifest | undefined) {
+    const cached = rememberPng(this.cacheKey(), blob, manifest)
+    this.clearTimers()
+    this.publish(this.ready(cached.blob, cached.manifest, cached.url))
   }
 
   private async createRevision(generation: number) {
@@ -173,8 +251,11 @@ export class ServerDisplayClient {
         signal: this.ac.signal,
       })
       if (!this.isCurrent(generation)) return
+      if (response.status === 404 || response.status === 410) {
+        this.recover(generation, true)
+        return
+      }
       if (response.status !== 200 && response.status !== 201) {
-        if (response.status === 404 || response.status === 410) return this.expire(generation, "This mosaic is no longer available. Retry after it reconnects.")
         throw new Error(await responseError(response, "The server could not create this display revision."))
       }
       const value: unknown = await response.json()
@@ -182,6 +263,7 @@ export class ServerDisplayClient {
         throw new Error("The server returned an invalid display revision.")
       }
       if (!this.isCurrent(generation)) return
+      this.recoveries = 0
       this.revision = value.revision
       this.publish({
         ...this.snapshot,
@@ -192,7 +274,7 @@ export class ServerDisplayClient {
       if (this.fullDue) void this.requestFull(generation, value.revision)
       void this.poll(generation, value.revision)
     } catch (error) {
-      this.fail(generation, error)
+      this.fail(generation, error, true)
     }
   }
 
@@ -207,7 +289,8 @@ export class ServerDisplayClient {
       })
       if (!this.isCurrent(generation, revision)) return
       if (response.status === 409 || response.status === 404 || response.status === 410) {
-        return this.expire(generation, "This display revision expired before its PNG was ready. Retry this display.")
+        this.recover(generation, false)
+        return
       }
       if (response.status !== 200 && response.status !== 202) {
         this.fullRequested = false
@@ -228,6 +311,10 @@ export class ServerDisplayClient {
 
   private async poll(generation: number, revision: string) {
     if (!this.isCurrent(generation, revision)) return
+    if (this.snapshot.fullBlob) {
+      this.clearTimers()
+      return
+    }
     try {
       const response = await this.fetcher(this.endpoint(`display-revisions/${encodeURIComponent(revision)}/status`), {
         cache: "no-store",
@@ -235,7 +322,8 @@ export class ServerDisplayClient {
       })
       if (!this.isCurrent(generation, revision)) return
       if (response.status === 404 || response.status === 410 || response.status === 409) {
-        return this.expire(generation, "This server display revision has expired. Retry this display.")
+        this.recover(generation, false)
+        return
       }
       if (!response.ok) throw new Error(await responseError(response, "The server display status could not be read."))
       const manifest = validateDisplayManifest(await response.json(), {
@@ -248,10 +336,14 @@ export class ServerDisplayClient {
       if (!sameServerColorDisplay(manifest.display, serverColorDisplay(this.display))) {
         return this.fail(generation, new Error("The server display settings do not match this revision."), true)
       }
-      if (!manifest.current) return this.expire(generation, "The server no longer lists this revision as current. Retry for fresh server output.")
+      if (!manifest.current) {
+        this.recover(generation, false)
+        return
+      }
       if (manifest.preview.state === "superseded" || manifest.preview.state === "evicted" ||
           manifest.full.state === "superseded" || manifest.full.state === "evicted") {
-        return this.expire(generation, "The server no longer retains this revision's PNG. Retry for fresh server output.")
+        this.recover(generation, false)
+        return
       }
       const progress = {
         completedRows: manifest.full.completed_rows,
@@ -288,9 +380,7 @@ export class ServerDisplayClient {
       this.pollTimer = setTimeout(() => void this.poll(generation, revision), this.timings.pollMs)
     } catch (error) {
       if (this.snapshot.fullBlob) {
-        // A cached current Blob remains exportable during a transient outage.
-        this.publish({ ...this.snapshot, phase: "ready", error: errorText(error), gate: { ...this.snapshot.gate, exportReady: true, label: "Cached current server PNG remains available" } })
-        this.pollTimer = setTimeout(() => void this.poll(generation, revision), this.timings.pollMs)
+        this.settle(this.snapshot.fullBlob, this.snapshot.manifest)
         return
       }
       this.fail(generation, error)
@@ -306,30 +396,22 @@ export class ServerDisplayClient {
       if (!this.isCurrent(generation, revision)) return
       if (!response.ok) {
         if (response.status === 404 || response.status === 410 || response.status === 409) {
-          return this.expire(generation, `The server ${kind} PNG expired. Retry the current display.`)
+          this.recover(generation, false)
+          return
         }
         throw new Error(await responseError(response, `The server ${kind} PNG could not be fetched.`))
       }
       const artifact = manifest[kind]
       const blob = await verifiedPng(response, artifact.width, artifact.height, artifact.bytes)
       if (!this.isCurrent(generation, revision)) return
-      const url = URL.createObjectURL(blob)
       if (kind === "preview") {
+        const url = URL.createObjectURL(blob)
         if (this.previewUrl) URL.revokeObjectURL(this.previewUrl)
         this.previewUrl = url
         this.publish({ ...this.snapshot, previewUrl: url })
         return
       }
-      if (this.fullUrl) URL.revokeObjectURL(this.fullUrl)
-      this.fullUrl = url
-      this.publish({
-        ...this.snapshot,
-        phase: "ready",
-        fullUrl: url,
-        fullBlob: blob,
-        gate: { exportReady: true, remapBusy: false, completedRevision: generation, pendingRevision: null, label: "Current server PNG is ready" },
-        error: undefined,
-      })
+      this.settle(blob, manifest)
     } catch (error) {
       if (kind === "preview" && this.isCurrent(generation, revision)) {
         this.previewFetchStarted = false
@@ -341,44 +423,69 @@ export class ServerDisplayClient {
     }
   }
 
-  private expire(generation: number, message: string) {
+  /** The job or its revision went away. A cached PNG stays exactly as it is;
+   * otherwise this quietly re-creates the revision, or asks the parent to run
+   * the view again when the job itself is gone. */
+  private recover(generation: number, jobLost: boolean) {
     if (!this.isCurrent(generation)) return
-    this.clearTimers()
-    this.generation++
     if (this.snapshot.fullBlob) {
+      this.settle(this.snapshot.fullBlob, this.snapshot.manifest)
+      return
+    }
+    if (jobLost) {
+      this.clearTimers()
+      this.revision = undefined
+      this.ac.abort()
       this.publish({
         ...this.snapshot,
-        phase: "ready",
-        error: `${message} The cached current PNG remains available to download.`,
-        gate: { ...this.snapshot.gate, exportReady: true, label: "Cached current server PNG remains available" },
+        phase: "creating",
+        revision: undefined,
+        previewUrl: undefined,
+        fullUrl: undefined,
+        completedRows: 0,
+        totalRows: 0,
+        error: undefined,
+        gate: { ...CLOSED_GATE, label: "Reconnecting the server image…" },
       })
+      if (!this.lostRequested) {
+        this.lostRequested = true
+        this.onLostJob?.()
+      }
       return
     }
     this.releaseUrls()
     this.revision = undefined
+    this.fullRequested = false
+    this.fullFetchStarted = false
+    this.previewFetchStarted = false
+    if (this.recoveries >= RECOVERY_ATTEMPTS) {
+      this.fail(generation, new Error("The server image could not be restored."), true)
+      return
+    }
+    this.recoveries++
+    this.generation++
+    const next = this.generation
+    this.ac.abort()
+    this.ac = new AbortController()
+    this.clearTimers()
     this.publish({
       ...this.snapshot,
-      phase: "expired",
+      phase: "creating",
       revision: undefined,
       previewUrl: undefined,
       fullUrl: undefined,
-      fullBlob: undefined,
-      error: message,
-      gate: { ...CLOSED_GATE, label: "Server PNG expired; retry the current display" },
+      completedRows: 0,
+      totalRows: 0,
+      error: undefined,
+      gate: { ...CLOSED_GATE, label: "Restoring the server image…" },
     })
+    this.previewTimer = setTimeout(() => void this.createRevision(next), RECOVERY_DELAY_MS)
   }
 
   private fail(generation: number, error: unknown, preserveBlob = false) {
     if (!this.isCurrent(generation)) return
     if (preserveBlob && this.snapshot.fullBlob) {
-      this.clearTimers()
-      this.generation++
-      this.publish({
-        ...this.snapshot,
-        phase: "ready",
-        error: errorText(error),
-        gate: { ...this.snapshot.gate, exportReady: true, label: "Cached current server PNG remains available" },
-      })
+      this.settle(this.snapshot.fullBlob, this.snapshot.manifest)
       return
     }
     this.clearTimers()
@@ -387,7 +494,7 @@ export class ServerDisplayClient {
       ...this.snapshot,
       phase: "failed",
       error: errorText(error),
-      gate: { ...CLOSED_GATE, label: "Server PNG failed; retry the current display" },
+      gate: { ...CLOSED_GATE, label: "The server PNG failed; try the display again" },
     })
   }
 
@@ -400,6 +507,10 @@ export class ServerDisplayClient {
   private isCurrent(generation: number, revision?: string): boolean {
     return !this.dead && !this.ac.signal.aborted && generation === this.generation &&
       (revision === undefined || revision === this.revision)
+  }
+
+  private cacheKey(display = this.display): string {
+    return pngCacheKey(this.expected.jobId, colorDisplayKey(display))
   }
 
   private endpoint(path: string): string {
@@ -415,22 +526,25 @@ export class ServerDisplayClient {
     this.pollTimer = undefined
   }
 
+  /** Full PNG URLs belong to the cache and are revoked only when it evicts
+   * them; the preview is owned by this client. */
   private releaseUrls() {
     if (this.previewUrl) URL.revokeObjectURL(this.previewUrl)
-    if (this.fullUrl) URL.revokeObjectURL(this.fullUrl)
     this.previewUrl = undefined
-    this.fullUrl = undefined
   }
 }
 
 async function verifiedPng(response: Response, width: number, height: number, bytes: number | null): Promise<Blob> {
   const mime = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase()
-  const length = Number(response.headers.get("content-length"))
-  if (mime !== "image/png" || !Number.isSafeInteger(length) || length <= 0 || (bytes !== null && bytes !== length)) {
+  const lengthHeader = response.headers.get("content-length")
+  const length = lengthHeader === null ? null : Number(lengthHeader)
+  if (mime !== "image/png" || (length !== null && (!Number.isSafeInteger(length) || length <= 0)) || (bytes !== null && length !== null && bytes !== length)) {
     throw new Error("The server PNG has an invalid MIME type or byte length.")
   }
   const blob = await response.blob()
-  if (blob.size !== length || blob.size < 57) throw new Error("The server PNG is incomplete.")
+  if ((length !== null && blob.size !== length) || (bytes !== null && blob.size !== bytes) || blob.size < 57) {
+    throw new Error("The server PNG is incomplete.")
+  }
   const head = new Uint8Array(await blob.slice(0, 33).arrayBuffer())
   const tail = new Uint8Array(await blob.slice(-12).arrayBuffer())
   const signature = [137, 80, 78, 71, 13, 10, 26, 10]

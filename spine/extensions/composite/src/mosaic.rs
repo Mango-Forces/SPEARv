@@ -301,6 +301,21 @@ impl Jobs {
         self.list.lock().ok()?.iter().find(|job| job.id == id).cloned()
     }
 
+    /// Stop one job by id. A missing id is a no-op so a late Stop after eviction
+    /// never fails the page.
+    fn cancel(&self, id: &str) -> bool {
+        let Ok(list) = self.list.lock() else {
+            return false;
+        };
+        let Some(job) = list.iter().find(|job| job.id == id) else {
+            return false;
+        };
+        job.cancel.store(true, Ordering::Relaxed);
+        job.control.cancel();
+        job.display_revisions.cancel();
+        true
+    }
+
     /// A running or finished job for this key. One that was cancelled or failed
     /// holds nothing worth joining, so the caller starts again.
     fn join(&self, key: &str) -> Option<Arc<Job>> {
@@ -2112,6 +2127,24 @@ pub(super) async fn status(
         Some(job) => Json(job.status(query.since.unwrap_or(0))).into_response(),
         None => missing(&id),
     }
+}
+
+/// Stop one mosaic. The page uses this for Stop so the engine releases reads
+/// immediately instead of waiting for abandon.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/mosaic/{id}",
+    params(("id" = String, Path, description = "Mosaic id")),
+    responses(
+        (status = 204, description = "Cancelled, or already gone"),
+    )
+)]
+pub(super) async fn cancel(
+    Extension(jobs): Extension<Arc<Jobs>>,
+    Path(id): Path<String>,
+) -> Response {
+    let _ = jobs.cancel(&id);
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// Frozen final raw-channel description. It is unavailable until the mosaic

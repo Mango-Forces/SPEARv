@@ -43,6 +43,9 @@ type RawControlsState = {
   cancel: () => void
   colorDisplay?: ColorDisplayView
   colorViewKey?: string
+  /** The armed mosaic for the current view is still running on the engine. */
+  mosaicBusy: boolean
+  stopMosaic: () => void
 }
 
 const EMPTY_RAW_CONTROLS: RawControlsState = {
@@ -52,6 +55,8 @@ const EMPTY_RAW_CONTROLS: RawControlsState = {
   resolved: { layers: [], lift: 1, invert: false },
   start: () => undefined,
   cancel: () => undefined,
+  mosaicBusy: false,
+  stopMosaic: () => undefined,
 }
 
 const LOGO = new URL("./assets/spear-logo.svg", import.meta.url).href
@@ -108,6 +113,8 @@ function ValidViewApp({ view }: { view: View }) {
   const [shareOpen, setShareOpen] = useState(false)
   const [topRightDrawer, setTopRightDrawer] = useState<"extras" | "share">("extras")
   const [rawControls, setRawControls] = useState<RawControlsState | null>(null)
+  const [find, setFind] = useState<{ key: string; run: number } | null>(null)
+  const findRun = useRef(0)
   const [point, setPoint] = useState<SpectrumPointTarget | null>(null)
   const [catalogStatus, setCatalogStatus] = useState<Record<CatalogSource, CatalogState | undefined>>({
     gaia: undefined,
@@ -144,8 +151,22 @@ function ValidViewApp({ view }: { view: View }) {
 
   const handleColourChange = (next: ColourConfigValue) => commit({ ...view, colour: next })
 
+  // Engine work starts only from Find. The key is the job identity, so moving
+  // the field, changing a mode or release, or editing the colour recipe retires
+  // the armed run and shows Find again.
+  const armed = find?.key === colorViewKey
+  const finding = armed && activeRaw.mosaicBusy
+  const findNow = (next: View) => {
+    findRun.current += 1
+    setFind({ key: scienceViewKey(next, next.colour ?? DEFAULT_COLOUR_CONFIG), run: findRun.current })
+  }
+  const stopFinding = () => {
+    activeRaw.stopMosaic()
+    setFind(null)
+  }
+
   // A narrow header is a rail. Show a control only while content remains to
-  // the right, so FOV, View and the modes are discoverable without a scrollbar.
+  // the right, so FOV, Find and the modes are discoverable without a scrollbar.
   useLayoutEffect(() => {
     const node = topbarRef.current
     if (!node) return
@@ -164,7 +185,7 @@ function ValidViewApp({ view }: { view: View }) {
     }
   }, [])
 
-  // The form owns its text until View. A mode or release change must not throw
+  // The form owns its text until Find. A mode or release change must not throw
   // away a half-typed coordinate.
   useEffect(() => {
     setDraft(textOf(view))
@@ -172,7 +193,7 @@ function ValidViewApp({ view }: { view: View }) {
   }, [view.ra, view.dec, view.fovL, view.fovH, view.fovLinked])
 
   // Release-option counts preview the draft form, so typing a location or
-  // FOV refreshes them before Show. The draft is debounced and an invalid
+  // FOV refreshes them before Find. The draft is debounced and an invalid
   // draft is skipped quietly, keeping the last good counts.
   useEffect(() => {
     const ra = parseRa(draft.ra)
@@ -190,7 +211,7 @@ function ValidViewApp({ view }: { view: View }) {
     return () => clearTimeout(timer)
   }, [draft.ra, draft.dec, draft.fovL, draft.fovH])
 
-  // A committed view change (Show, a link, a pan) still refreshes the counts
+  // A committed view change (Find, a link) still refreshes the counts
   // immediately, even if the draft was invalid and never debounced through.
   useEffect(() => {
     setCountRegion((current) =>
@@ -342,7 +363,9 @@ function ValidViewApp({ view }: { view: View }) {
     }
     const fovH = draftLinked ? fovL : parsedH
     setFormError(undefined)
-    commit({ ...view, ra, dec, fovL, fovH, fovLinked: draftLinked })
+    const next = { ...view, ra, dec, fovL, fovH, fovLinked: draftLinked }
+    commit(next)
+    findNow(next)
   }
 
   return (
@@ -458,7 +481,7 @@ function ValidViewApp({ view }: { view: View }) {
             {formError}
           </span>
         ) : null}
-        <div className="modes" role="group" aria-label="View">
+        <div className="modes" role="group" aria-label="Workspace">
           {MODES.map((mode) => {
             const available = mode.id !== "specific"
             return (
@@ -484,8 +507,22 @@ function ValidViewApp({ view }: { view: View }) {
             )
           })}
         </div>
-        <button className="show" type="submit" form="location-form">
-          View
+        <button
+          className={finding ? "show show--stop" : "show"}
+          type="submit"
+          form="location-form"
+          aria-label={finding ? "Stop finding this field" : "Find this field"}
+          title={finding ? "Stop the running search" : "Start the search for this field"}
+          onClick={
+            finding
+              ? (event) => {
+                  event.preventDefault()
+                  stopFinding()
+                }
+              : undefined
+          }
+        >
+          {finding ? "Stop" : "Find"}
         </button>
         </header>
         {railCue ? (
@@ -580,6 +617,8 @@ function ValidViewApp({ view }: { view: View }) {
         </EdgeSidebar>
         <SkyShell
           view={view}
+          armed={armed}
+          run={find?.run ?? 0}
           visits={visits}
           exposures={exposures}
           releaseCounts={releaseCounts}
@@ -764,6 +803,8 @@ function scienceViewKey(view: View, colour: ColourConfigValue): string {
  * host. */
 function SkyShell(props: {
   view: View
+  armed: boolean
+  run: number
   visits: VisitRow[]
   exposures: number | undefined
   releaseCounts: Record<string, number>
@@ -777,8 +818,8 @@ function SkyShell(props: {
   onOpenSpectrum: () => void
 }) {
   const { view, visits } = props
-  const mosaic = useMosaic(view, props.colour.colorBands)
-  const raw = useRawLayers(mosaic, props.display, props.rawEnabled, view.color, scienceViewKey(view, props.colour))
+  const mosaic = useMosaic(view, props.colour.colorBands, props.armed, props.run)
+  const raw = useRawLayers(mosaic, props.display, props.rawEnabled, view.color, scienceViewKey(view, props.colour), mosaic.restart)
   const rawStateKey = JSON.stringify(raw.state)
   const rawGateKey = JSON.stringify(raw.gate)
   const rawColorKey = JSON.stringify(raw.colorDisplay && {
@@ -798,6 +839,7 @@ function SkyShell(props: {
   const rawColorBlob = raw.colorDisplay?.fullBlob
   const rawColorRetry = raw.colorDisplay?.retry
   const displayKey = JSON.stringify(props.display)
+  const mosaicBusy = props.armed && isBusy(mosaic) && !mosaic.final
   useEffect(() => {
     props.onRawState({
       state: raw.state,
@@ -808,8 +850,10 @@ function SkyShell(props: {
       cancel: raw.cancel,
       colorDisplay: raw.colorDisplay,
       colorViewKey: raw.colorDisplay?.viewKey,
+      mosaicBusy,
+      stopMosaic: mosaic.stop,
     })
-  }, [props.onRawState, props.rawEnabled, rawStateKey, rawGateKey, raw.metadata, rawColorKey, rawColorBlob, rawColorRetry, scienceViewKey(view, props.colour), displayKey, raw.start, raw.cancel])
+  }, [props.onRawState, props.rawEnabled, rawStateKey, rawGateKey, raw.metadata, rawColorKey, rawColorBlob, rawColorRetry, scienceViewKey(view, props.colour), displayKey, raw.start, raw.cancel, mosaicBusy, mosaic.stop])
 
   // The clicked pixel is the rendered-grid index. Resolve its sky with the same
   // north-up TAN projection the server uses, so the panel can show the readout
@@ -825,8 +869,8 @@ function SkyShell(props: {
     props.onOpenSpectrum()
   }
 
-  const shownStatus = statusText(mosaic)
-  const busy = isBusy(mosaic)
+  const shownStatus = props.armed ? statusText(mosaic) : "idle"
+  const busy = props.armed && isBusy(mosaic)
   const shownGrid = mosaic.mosaic && `${mosaic.mosaic.info.width}×${mosaic.mosaic.info.height}`
   const shownError = mosaic.error ?? warningText(mosaic)
   const counted = Object.keys(props.releaseCounts).length > 0
@@ -850,7 +894,9 @@ function SkyShell(props: {
             />
           ) : (
             <div className="empty">
-              {busy ? (
+              {!props.armed ? (
+                <span className="empty-find">Press Find to search this field.</span>
+              ) : busy ? (
                 <span className="rendering">
                   Rendering {view.color ? "RGB" : view.mode} · {shownStatus}
                 </span>
