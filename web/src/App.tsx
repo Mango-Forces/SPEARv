@@ -169,7 +169,9 @@ function ValidViewApp({ view }: { view: View }) {
     const stop = activeRaw.stopMosaic()
     // Disarm immediately so useMosaic does not start a new job after cancel.
     setFind(null)
-    void Promise.resolve(stop).finally(() => setStopping(false))
+    void Promise.resolve(stop)
+      .catch(() => undefined)
+      .finally(() => setStopping(false))
   }
 
   // A narrow header is a rail. Show a control only while content remains to

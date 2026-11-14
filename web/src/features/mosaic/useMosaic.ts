@@ -237,6 +237,12 @@ async function follow(
   if (!started.data) throw new Error(serverError(started.error) ?? `the mosaic did not start (${started.response.status})`)
   const info = started.data
   joined(info.id)
+  // Stop can land while the start request is still open. The engine may already
+  // have the job; cancel it instead of painting a run the user abandoned.
+  if (signal.aborted) {
+    await cancelJob(info.id)
+    return
+  }
   update({ reconnecting: false })
   const canvas = document.createElement("canvas")
   const color = query.color === "1"
