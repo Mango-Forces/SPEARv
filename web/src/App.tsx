@@ -834,7 +834,16 @@ function SkyShell(props: {
   const rawColorBlob = raw.colorDisplay?.fullBlob
   const rawColorRetry = raw.colorDisplay?.retry
   const displayKey = JSON.stringify(props.display)
-  const mosaicBusy = props.armed && isBusy(mosaic)
+  // Color sets mosaic.final as soon as science lands; the server PNG can still
+  // be rendering. Keep Stop up until that PNG is cached or the display fails.
+  const colorPending =
+    view.color &&
+    !!mosaic.final &&
+    !!raw.colorDisplay &&
+    !raw.colorDisplay.fullBlob &&
+    raw.colorDisplay.phase !== "failed" &&
+    raw.colorDisplay.phase !== "expired"
+  const mosaicBusy = props.armed && (isBusy(mosaic) || !!colorPending)
   useEffect(() => {
     props.onRawState({
       state: raw.state,
