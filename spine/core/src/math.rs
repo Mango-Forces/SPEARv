@@ -24,8 +24,6 @@ pub enum MathError {
     Unsupported(&'static str),
     #[error("math needs {bytes} reserved bytes; the work budget is full")]
     Busy { bytes: u64 },
-    #[error("all {limit} math workers are busy; retry when one finishes")]
-    Workers { limit: usize },
     #[error("math library rejected an internal request: {0}")]
     Internal(String),
     #[error("math request was cancelled")]

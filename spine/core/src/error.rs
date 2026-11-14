@@ -46,7 +46,7 @@ impl IntoResponse for Error {
     fn into_response(self) -> Response {
         let status = match &self {
             Self::Math(MathError::Input(_)) => StatusCode::BAD_REQUEST,
-            Self::Math(MathError::Busy { .. } | MathError::Workers { .. }) => StatusCode::TOO_MANY_REQUESTS,
+            Self::Math(MathError::Busy { .. }) => StatusCode::TOO_MANY_REQUESTS,
             Self::Math(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::FovOutOfRange { .. } | Self::InvalidSky | Self::Message(_) => StatusCode::BAD_REQUEST,
             Self::Busy(_) => StatusCode::TOO_MANY_REQUESTS,

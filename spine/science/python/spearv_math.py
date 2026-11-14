@@ -67,6 +67,59 @@ def nearest_fits(x):
     return np.where(x >= 0, np.floor(x + 0.5), np.ceil(x - 0.5))
 
 
+# The exact transform is solved on a lattice of target pixels and interpolated
+# between its nodes; a pixel whose nearest native pixel the interpolation error
+# could change is then solved exactly, so the result is the exact transform's.
+# _NODE is the node spacing in target pixels and _AMBIGUOUS how close to a
+# rounding boundary (native pixels) counts. The lattice is checked against
+# itself at twice the spacing, where the bilinear error of this smooth
+# transform is four times larger, so the bound on that check keeps the
+# interpolation within half of _AMBIGUOUS.
+_NODE = 16
+_CHECK = 2 * _NODE
+_AMBIGUOUS = 2e-3
+_CHECK_ERROR = 4 * (_AMBIGUOUS / 2)
+
+
+def _native(out, w, x, y):
+    ra, dec = out.all_pix2world(x, y, 1)
+    # NoConvergence is an error even when best_solution is finite.
+    px, py = w.all_world2pix(ra, dec, 1, tolerance=1e-12, maxiter=50,
+                             adaptive=False, detect_divergence=True, quiet=False)
+    if not (np.all(np.isfinite(px)) and np.all(np.isfinite(py))):
+        raise ValueError("non-finite coordinate transform")
+    return px, py
+
+
+def _bilinear(nodes, step, kx, ky):
+    # nodes is (2, rows, cols): both native axes are interpolated in one pass.
+    fx, fy = kx / step, ky / step
+    i = np.minimum(fx.astype(np.intp), nodes.shape[2] - 2)
+    j = np.minimum(fy.astype(np.intp), nodes.shape[1] - 2)
+    tx, ty = fx - i, (fy - j)[:, None]
+    rows = nodes[:, :, i] * (1 - tx)
+    rows += nodes[:, :, i + 1] * tx
+    grid = rows[:, j] * (1 - ty)
+    grid += rows[:, j + 1] * ty
+    return grid
+
+
+def _lattice(out, w, xs, ys):
+    # The exact transform solved on a lattice and interpolated between its
+    # nodes, or None when the tile is too small for one or the lattice misses
+    # its error bound.
+    width, height = xs.size, ys.size
+    if width <= _CHECK or height <= _CHECK:
+        return None
+    nx = np.arange(2 * ((width - 2) // _CHECK + 1) + 1, dtype=np.float64) * _NODE
+    ny = np.arange(2 * ((height - 2) // _CHECK + 1) + 1, dtype=np.float64) * _NODE
+    dx, dy = xs[1] - xs[0], ys[1] - ys[0]
+    nodes = np.stack(_native(out, w, *np.meshgrid(xs[0] + nx * dx, ys[0] + ny * dy)))
+    if np.max(np.abs(_bilinear(nodes[:, ::2, ::2], _CHECK, nx, ny) - nodes)) > _CHECK_ERROR:
+        return None
+    return _bilinear(nodes, _NODE, np.arange(width, dtype=np.float64), np.arange(height, dtype=np.float64))
+
+
 def geometry(spec, window, target, tile):
     w = _wcs(spec)  # Independent mutable WCS for this call/session.
     out = WCS(naxis=2)
@@ -77,23 +130,43 @@ def geometry(spec, window, target, tile):
     out.wcs.cunit = ["deg", "deg"]
     out.wcs.lonpole = 180.0
     out.wcs.radesys = "ICRS"
-    x, y = np.meshgrid(np.arange(tile["width"], dtype=np.float64) + tile["x"] + 1,
-                       np.arange(tile["height"], dtype=np.float64) + tile["y"] + 1)
+    xs = np.arange(tile["width"], dtype=np.float64) + tile["x"] + 1
+    ys = np.arange(tile["height"], dtype=np.float64) + tile["y"] + 1
     if tile["png"]:
-        y = target["height"] + 1 - y
-    ra, dec = out.all_pix2world(x, y, 1)
-    # NoConvergence is an error even when best_solution is finite.
-    px, py = w.all_world2pix(ra, dec, 1, tolerance=1e-12, maxiter=50,
-                             adaptive=False, detect_divergence=True, quiet=False)
-    if not (np.all(np.isfinite(px)) and np.all(np.isfinite(py))):
-        raise ValueError("non-finite coordinate transform")
-    ix, iy = nearest_fits(px), nearest_fits(py)
-    col, row = ix - window["x"], iy - window["y"]
-    valid = ((ix >= 1) & (iy >= 1) & (ix <= spec["naxis"][0]) & (iy <= spec["naxis"][1])
-             & (col >= 0) & (row >= 0) & (col < window["width"]) & (row < window["height"]))
-    indices = np.full(x.shape, -1, dtype=np.int64)
-    indices[valid] = (row[valid] * window["width"] + col[valid]).astype(np.int64)
-    return indices.reshape(-1)
+        ys = target["height"] + 1 - ys
+    # The native pixels this window can select.
+    first = (max(window["x"], 1), max(window["y"], 1))
+    last = (min(window["x"] + window["width"] - 1, spec["naxis"][0]),
+            min(window["y"] + window["height"] - 1, spec["naxis"][1]))
+    positions = _lattice(out, w, xs, ys)
+    interpolated = positions is not None
+    if not interpolated:
+        positions = np.stack(_native(out, w, *np.meshgrid(xs, ys)))
+    # floor(x + 0.5) is nearest_fits for every position a window can select.
+    positions += 0.5
+    nearest = np.floor(positions)
+    if interpolated:
+        # A position this close to a rounding boundary may round the other way
+        # under the exact transform, so it is solved exactly. One native pixel
+        # of margin keeps the pixels such a solve could bring into the window.
+        positions -= nearest
+        positions -= 0.5
+        np.abs(positions, out=positions)
+        near = positions[0] > 0.5 - _AMBIGUOUS
+        near |= positions[1] > 0.5 - _AMBIGUOUS
+        near &= ((nearest[0] >= first[0] - 1) & (nearest[0] <= last[0] + 1)
+                 & (nearest[1] >= first[1] - 1) & (nearest[1] <= last[1] + 1))
+        rows, cols = np.divmod(np.flatnonzero(near.reshape(-1)), xs.size)
+        if rows.size:
+            exact = _native(out, w, xs[cols], ys[rows])
+            nearest[0, rows, cols], nearest[1, rows, cols] = nearest_fits(exact[0]), nearest_fits(exact[1])
+    ix, iy = nearest[0].reshape(-1), nearest[1].reshape(-1)
+    valid = (ix >= first[0]) & (ix <= last[0]) & (iy >= first[1]) & (iy <= last[1])
+    iy -= window["y"]
+    iy *= window["width"]
+    iy += ix
+    iy -= window["x"]
+    return np.where(valid, iy, -1).astype(np.int64)
 
 
 def _bad(flags, bits, policy):

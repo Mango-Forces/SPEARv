@@ -5,15 +5,17 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, OnceLock,
+        Arc, Condvar, Mutex, OnceLock, PoisonError,
     },
+    time::Duration,
 };
 
+use ndarray::ArrayView1;
 use numpy::{Element, IntoPyArray, PyArray1, PyArrayMethods, PyUntypedArrayMethods};
 use pyo3::{
     ffi,
     prelude::*,
-    types::{PyDict, PyModule, PyTuple},
+    types::{PyCapsule, PyDict, PyModule, PyTuple},
 };
 use spearv_core::{
     math::{
@@ -23,7 +25,6 @@ use spearv_core::{
     },
     FlagBits, Poly, Wcs, WorkBudget,
 };
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// Trusted deployment configuration. The host constructor is qualification
 /// only; it must not be used as a production distribution/ABI decision.
@@ -108,10 +109,55 @@ impl RuntimeConfig {
     }
 }
 
+/// How often a call waiting for a worker slot rechecks its own cancellation.
+const WORKER_POLL: Duration = Duration::from_millis(50);
+
+/// Bounds concurrent library calls. A call waits for a slot: a full pool is
+/// never an error, and only the caller's own cancellation ends the wait.
+struct Workers {
+    free: Mutex<usize>,
+    released: Condvar,
+}
+
+struct WorkerSlot(Arc<Workers>);
+
+impl Workers {
+    fn new(limit: usize) -> Arc<Self> {
+        Arc::new(Self {
+            free: Mutex::new(limit),
+            released: Condvar::new(),
+        })
+    }
+
+    /// Blocks the calling thread, so it must be a blocking math worker.
+    fn acquire(self: &Arc<Self>, control: &MathControl) -> MathResult<WorkerSlot> {
+        let mut free = self.free.lock().unwrap_or_else(PoisonError::into_inner);
+        loop {
+            control.check()?;
+            if *free > 0 {
+                *free -= 1;
+                return Ok(WorkerSlot(Arc::clone(self)));
+            }
+            free = self
+                .released
+                .wait_timeout(free, WORKER_POLL)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
+}
+
+impl Drop for WorkerSlot {
+    fn drop(&mut self) {
+        *self.0.free.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        self.0.released.notify_one();
+    }
+}
+
 struct Interpreter {
     config: RuntimeConfig,
     module: Py<PyModule>,
-    workers: Arc<Semaphore>,
+    workers: Arc<Workers>,
     budget: Arc<WorkBudget>,
     description: String,
     // CPython is intentionally never finalized by this in-process backend.
@@ -181,7 +227,7 @@ impl PythonMath {
             }
         };
         let interpreter = Arc::new(Interpreter {
-            workers: Arc::new(Semaphore::new(config.max_workers)),
+            workers: Workers::new(config.max_workers),
             config,
             module,
             budget,
@@ -291,6 +337,23 @@ fn readonly<T: Element>(py: Python<'_>, data: Vec<T>) -> MathResult<Py<PyArray1<
     Ok(array.unbind())
 }
 
+/// A read-only NumPy view of an immutable pinned buffer, without copying it.
+/// The array owns `pin`, so the buffer outlives any reference Python keeps.
+fn pinned_view<'py, T: Element, P: Send + 'static>(
+    py: Python<'py>,
+    data: &[T],
+    pin: P,
+) -> MathResult<Bound<'py, PyArray1<T>>> {
+    let owner = PyCapsule::new(py, pin, None).map_err(library_error)?;
+    // SAFETY: `data` lives in the buffer `pin` keeps alive and never mutates,
+    // and the array is made read-only before Python can see it.
+    let array = unsafe { PyArray1::borrow_from_array(&ArrayView1::from(data), owner.into_any()) };
+    array
+        .call_method1("setflags", (false,))
+        .map_err(library_error)?;
+    Ok(array)
+}
+
 fn copy_array<T: Element + Copy>(array: &Bound<'_, PyAny>, n: usize) -> MathResult<Vec<T>> {
     let array = array
         .cast::<PyArray1<T>>()
@@ -394,11 +457,7 @@ impl ImageMath for PythonMath {
         if n > self.config().max_spectrum_samples {
             return Err(MathError::Input("runtime spectrum sample bound".into()));
         }
-        let _worker = Arc::clone(&self.interpreter.workers)
-            .try_acquire_owned()
-            .map_err(|_| MathError::Workers {
-                limit: self.interpreter.config.max_workers,
-            })?;
+        let _worker = self.interpreter.workers.acquire(control)?;
         let _scratch = MathLease::reserve(
             self.budget(),
             (n as u64).checked_mul(64).ok_or(MathError::Overflow)? + 1024 * 1024,
@@ -438,13 +497,10 @@ impl ImageMath for PythonMath {
 }
 
 impl Session {
-    /// A worker slot and scratch charge for one library call only.
-    fn admit(&self, scratch: u64) -> MathResult<(OwnedSemaphorePermit, MathLease)> {
-        let worker = Arc::clone(&self.runtime.workers)
-            .try_acquire_owned()
-            .map_err(|_| MathError::Workers {
-                limit: self.runtime.config.max_workers,
-            })?;
+    /// A worker slot and scratch charge for one library call only. Waits for
+    /// the slot, so the scratch is charged only while the call can run.
+    fn admit(&self, scratch: u64) -> MathResult<(WorkerSlot, MathLease)> {
+        let worker = self.runtime.workers.acquire(&self.control)?;
         Ok((worker, MathLease::reserve(&self.runtime.budget, scratch)?))
     }
 
@@ -656,22 +712,18 @@ impl MathSession for Session {
             (_, MaskPolicy::Composite) => "composite",
             (_, MaskPolicy::Delta) => "delta",
         };
-        // Copies of native inputs and geometry used by Python are separately
-        // charged while the Rust cache/input pins remain live.
-        let (_worker, _scratch) = self.admit(
-            self.call_scratch()?
-                + input.planes().window.shape.bytes(19)?
-                + self.tile.shape.bytes(8)?,
-        )?;
+        // Python sees the pinned native planes and geometry in place; only the
+        // tile-sized gathers it makes from them are scratch.
+        let (_worker, _scratch) = self.admit(self.call_scratch()?)?;
         Python::attach(|py| -> MathResult<()> {
             let planes = input.planes();
-            let image = readonly(py, planes.image.clone())?;
-            let variance = readonly(py, planes.variance.clone())?;
-            let zodi = readonly(py, planes.zodi.clone())?;
-            let flags = readonly(py, planes.flags.clone())?;
-            let native_bands = readonly(py, planes.bands.clone())?;
-            let valid = readonly(py, planes.valid.clone())?;
-            let indices = readonly(py, geometry.indices().to_vec())?;
+            let image = pinned_view(py, &planes.image, input.clone())?;
+            let variance = pinned_view(py, &planes.variance, input.clone())?;
+            let zodi = pinned_view(py, &planes.zodi, input.clone())?;
+            let flags = pinned_view(py, &planes.flags, input.clone())?;
+            let native_bands = pinned_view(py, &planes.bands, input.clone())?;
+            let valid = pinned_view(py, &planes.valid, input.clone())?;
+            let indices = pinned_view(py, geometry.indices(), geometry.clone())?;
             let flags_spec = PyDict::new(py);
             for (name, value) in [
                 ("source", bits.source),
@@ -692,13 +744,13 @@ impl MathSession for Session {
                 .call1((
                     self.kind,
                     &state,
-                    image.bind(py),
-                    variance.bind(py),
-                    zodi.bind(py),
-                    flags.bind(py),
-                    native_bands.bind(py),
-                    valid.bind(py),
-                    indices.bind(py),
+                    image,
+                    variance,
+                    zodi,
+                    flags,
+                    native_bands,
+                    valid,
+                    indices,
                     flags_spec,
                     policy,
                     selected,
@@ -1004,7 +1056,7 @@ mod boundary_tests {
     }
 
     #[test]
-    fn worker_slots_are_taken_per_call_not_per_session() {
+    fn worker_slots_are_per_call_and_a_full_pool_waits() {
         let runtime = runtime();
         let tile = Tile {
             x: 0,
@@ -1023,17 +1075,31 @@ mod boundary_tests {
                     .unwrap()
             })
             .collect();
-        let limit = runtime.config().max_workers;
-        let held = Arc::clone(&runtime.interpreter.workers)
-            .try_acquire_many_owned(limit as u32)
-            .unwrap();
-        assert!(matches!(
-            sessions[0].snapshot(),
-            Err(MathError::Workers { limit: l }) if l == limit
-        ));
+        let hold = || -> Vec<_> {
+            (0..runtime.config().max_workers)
+                .map(|_| runtime.interpreter.workers.acquire(&control).unwrap())
+                .collect()
+        };
+        let held = hold();
+        let mut waiting = sessions.pop().unwrap();
+        let waiter = std::thread::spawn(move || waiting.snapshot().map(|_| ()));
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(!waiter.is_finished(), "a full pool is waited for, not failed");
         drop(held);
+        waiter.join().unwrap().unwrap();
         for session in &mut sessions {
             session.snapshot().unwrap();
         }
+
+        let held = hold();
+        let cancelled = MathControl::new(Arc::new(std::sync::atomic::AtomicU64::new(1)));
+        let mut waiting = runtime
+            .session(cancelled.clone(), tile, Product::Values)
+            .unwrap();
+        let waiter = std::thread::spawn(move || waiting.snapshot().map(|_| ()));
+        std::thread::sleep(Duration::from_millis(200));
+        cancelled.cancel();
+        assert!(matches!(waiter.join().unwrap(), Err(MathError::Cancelled)));
+        drop(held);
     }
 }
