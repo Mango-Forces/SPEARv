@@ -496,7 +496,231 @@ impl ImageMath for PythonMath {
     }
 }
 
+/// Target pixels between the exact transform nodes of a geometry lattice.
+const LATTICE_NODE: u32 = 16;
+/// How close to a rounding boundary, in native pixels, an interpolated
+/// position is solved exactly instead. The lattice is only used when its
+/// interpolation error is at most half of this.
+const LATTICE_AMBIGUOUS: f64 = 2e-3;
+
+/// Exact native positions of every [`LATTICE_NODE`]-th tile pixel, row-major,
+/// together with the library frames used to solve them.
+struct Lattice {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    rows: usize,
+    cols: usize,
+    frames: Py<PyAny>,
+}
+
+impl Lattice {
+    /// The lattice cell and the weight of its far node for one tile pixel.
+    fn cell(at: usize, nodes: usize) -> (usize, f64) {
+        let position = at as f64 / f64::from(LATTICE_NODE);
+        let cell = (position as usize).min(nodes - 2);
+        (cell, position - cell as f64)
+    }
+
+    /// The native index of every tile pixel whose interpolated position is
+    /// unambiguous, and the tile pixels that need the exact transform: those
+    /// near enough to a rounding boundary for the interpolation error to pick
+    /// another native pixel. One native pixel of margin around the window
+    /// keeps the pixels an exact solve could bring into it.
+    fn select(&self, tile: Tile, window: NativeWindow) -> (Vec<i64>, Vec<i64>, Vec<i64>) {
+        let (width, height) = (tile.shape.width as usize, tile.shape.height as usize);
+        let support = Support::of(window);
+        let mut indices = vec![-1; width * height];
+        let (mut cols, mut rows) = (Vec::new(), Vec::new());
+        let across: Vec<_> = (0..width).map(|col| Self::cell(col, self.cols)).collect();
+        for row in 0..height {
+            let (cell, down) = Self::cell(row, self.rows);
+            let (upper, lower) = (cell * self.cols, (cell + 1) * self.cols);
+            for (col, &(left, right)) in across.iter().enumerate() {
+                let at = |nodes: &[f64]| {
+                    let top = nodes[upper + left] * (1.0 - right) + nodes[upper + left + 1] * right;
+                    let bottom = nodes[lower + left] * (1.0 - right) + nodes[lower + left + 1] * right;
+                    top * (1.0 - down) + bottom * down
+                };
+                let (px, py) = (at(&self.x), at(&self.y));
+                let (ix, iy) = ((px + 0.5).floor(), (py + 0.5).floor());
+                if !support.near(ix, iy) {
+                    continue;
+                }
+                let sure = 0.5 - LATTICE_AMBIGUOUS;
+                if (px - ix).abs() > sure || (py - iy).abs() > sure {
+                    cols.push(col as i64);
+                    rows.push(row as i64);
+                } else if let Some(index) = support.index(ix, iy) {
+                    indices[row * width + col] = index;
+                }
+            }
+        }
+        (indices, cols, rows)
+    }
+}
+
+/// The native pixels one window can select, as FITS pixel numbers.
+struct Support {
+    first: [f64; 2],
+    last: [f64; 2],
+    width: i64,
+}
+
+impl Support {
+    fn of(window: NativeWindow) -> Self {
+        let first = [f64::from(window.origin[0]), f64::from(window.origin[1])];
+        Self {
+            first,
+            last: [
+                first[0] + f64::from(window.shape.width) - 1.0,
+                first[1] + f64::from(window.shape.height) - 1.0,
+            ],
+            width: i64::from(window.shape.width),
+        }
+    }
+
+    fn near(&self, ix: f64, iy: f64) -> bool {
+        ix >= self.first[0] - 1.0
+            && ix <= self.last[0] + 1.0
+            && iy >= self.first[1] - 1.0
+            && iy <= self.last[1] + 1.0
+    }
+
+    /// The row-major window index of native pixel `(ix, iy)`, if it has one.
+    fn index(&self, ix: f64, iy: f64) -> Option<i64> {
+        (ix >= self.first[0] && ix <= self.last[0] && iy >= self.first[1] && iy <= self.last[1])
+            .then(|| (iy - self.first[1]) as i64 * self.width + (ix - self.first[0]) as i64)
+    }
+}
+
 impl Session {
+    /// The native WCS, target grid and tile as the library's geometry calls
+    /// take them.
+    fn frames<'py>(
+        &self,
+        py: Python<'py>,
+        native: &Wcs,
+        target: TargetGrid,
+    ) -> MathResult<(Bound<'py, PyDict>, Bound<'py, PyDict>, Bound<'py, PyDict>)> {
+        let grid = PyDict::new(py);
+        for (key, value) in [
+            ("ra", target.ra),
+            ("dec", target.dec),
+            ("scale", target.scale_deg),
+        ] {
+            grid.set_item(key, value).map_err(library_error)?;
+        }
+        grid.set_item("width", target.shape.width)
+            .map_err(library_error)?;
+        grid.set_item("height", target.shape.height)
+            .map_err(library_error)?;
+        let tile = PyDict::new(py);
+        tile.set_item("x", self.tile.x).map_err(library_error)?;
+        tile.set_item("y", self.tile.y).map_err(library_error)?;
+        tile.set_item("width", self.tile.shape.width)
+            .map_err(library_error)?;
+        tile.set_item("height", self.tile.shape.height)
+            .map_err(library_error)?;
+        tile.set_item("png", self.tile.order == RasterOrder::Png)
+            .map_err(library_error)?;
+        Ok((wcs_dict(py, native)?, grid, tile))
+    }
+
+    /// The native index each tile pixel selects, -1 outside the window. The
+    /// library solves the exact transform on a lattice; positions between its
+    /// nodes are interpolated here, off the GIL, and every pixel the
+    /// interpolation error could move to another native pixel goes back to
+    /// the library, so the result is the exact transform's. A tile the
+    /// lattice cannot serve is solved exactly pixel by pixel.
+    fn indices(
+        &self,
+        native: &Wcs,
+        window: NativeWindow,
+        target: TargetGrid,
+    ) -> MathResult<Vec<i64>> {
+        let transform = |error: PyErr| MathError::Transform(error.to_string());
+        let module = &self.runtime.module;
+        let lattice = Python::attach(|py| -> MathResult<_> {
+            let (spec, grid, tile) = self.frames(py, native, target)?;
+            let result = module
+                .bind(py)
+                .getattr("geometry_lattice")
+                .map_err(library_error)?
+                .call1((spec, grid, tile, LATTICE_NODE, LATTICE_AMBIGUOUS / 2.0))
+                .map_err(transform)?;
+            if result.is_none() {
+                return Ok(None);
+            }
+            let size = |item: usize| -> MathResult<usize> {
+                result
+                    .get_item(item)
+                    .and_then(|value| value.extract())
+                    .map_err(library_error)
+            };
+            let (rows, cols) = (size(2)?, size(3)?);
+            if rows < 2 || cols < 2 {
+                return Err(MathError::Internal("library lattice shape".into()));
+            }
+            Ok(Some(Lattice {
+                x: copy_array(&result.get_item(0).map_err(library_error)?, rows * cols)?,
+                y: copy_array(&result.get_item(1).map_err(library_error)?, rows * cols)?,
+                rows,
+                cols,
+                frames: result.get_item(4).map_err(library_error)?.unbind(),
+            }))
+        })?;
+        let Some(lattice) = lattice else {
+            return Python::attach(|py| {
+                let (spec, grid, tile) = self.frames(py, native, target)?;
+                let native_window = PyDict::new(py);
+                for (key, value) in [
+                    ("x", i64::from(window.origin[0])),
+                    ("y", i64::from(window.origin[1])),
+                    ("width", i64::from(window.shape.width)),
+                    ("height", i64::from(window.shape.height)),
+                ] {
+                    native_window.set_item(key, value).map_err(library_error)?;
+                }
+                let result = module
+                    .bind(py)
+                    .getattr("geometry")
+                    .map_err(library_error)?
+                    .call1((spec, native_window, grid, tile))
+                    .map_err(transform)?;
+                copy_array(&result, self.tile.shape.len()?)
+            });
+        };
+        self.control.check()?;
+        let (mut indices, cols, rows) = lattice.select(self.tile, window);
+        if cols.is_empty() {
+            return Ok(indices);
+        }
+        let width = self.tile.shape.width as usize;
+        let pixels: Vec<_> = cols
+            .iter()
+            .zip(&rows)
+            .map(|(col, row)| *row as usize * width + *col as usize)
+            .collect();
+        let frames = lattice.frames;
+        let (ix, iy) = Python::attach(|py| -> MathResult<(Vec<f64>, Vec<f64>)> {
+            let result = module
+                .bind(py)
+                .getattr("geometry_exact")
+                .map_err(library_error)?
+                .call1((frames.bind(py), cols.into_pyarray(py), rows.into_pyarray(py)))
+                .map_err(transform)?;
+            Ok((
+                copy_array(&result.get_item(0).map_err(library_error)?, pixels.len())?,
+                copy_array(&result.get_item(1).map_err(library_error)?, pixels.len())?,
+            ))
+        })?;
+        let support = Support::of(window);
+        for ((pixel, ix), iy) in pixels.into_iter().zip(ix).zip(iy) {
+            indices[pixel] = support.index(ix, iy).unwrap_or(-1);
+        }
+        Ok(indices)
+    }
+
     /// A worker slot and scratch charge for one library call only. Waits for
     /// the slot, so the scratch is charged only while the call can run.
     fn admit(&self, scratch: u64) -> MathResult<(WorkerSlot, MathLease)> {
@@ -510,39 +734,23 @@ impl Session {
         Ok(self.tile.shape.bytes(2 * self.state_per_pixel + 512)? + 1024 * 1024)
     }
 
-    /// Private NumPy copies of the running state for one call.
-    fn state_arrays<'py>(&self, py: Python<'py>) -> Bound<'py, PyTuple> {
-        let count = match &self.count {
+    /// Writable NumPy views of the running state for one call. The library
+    /// validates every input and count bound before mutating them.
+    fn state_arrays<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyTuple> {
+        // SAFETY: `&mut self` is held for the synchronous library call, and
+        // the library never retains the state tuple after returning.
+        unsafe fn view<'py, T: Element>(py: Python<'py>, data: &mut [T]) -> Bound<'py, PyAny> {
+            let owner = PyTuple::empty(py).into_any();
+            unsafe { PyArray1::borrow_from_array(&ArrayView1::from(&*data), owner) }.into_any()
+        }
+        let sum_f = unsafe { view(py, &mut self.sum_f) };
+        let sum_w = unsafe { view(py, &mut self.sum_w) };
+        let count = match &mut self.count {
             None => py.None().into_bound(py),
-            Some(Counts::U16(v)) => PyArray1::from_slice(py, v).into_any(),
-            Some(Counts::U64(v)) => PyArray1::from_slice(py, v).into_any(),
+            Some(Counts::U16(v)) => unsafe { view(py, v) },
+            Some(Counts::U64(v)) => unsafe { view(py, v) },
         };
-        PyTuple::new(
-            py,
-            [
-                PyArray1::from_slice(py, &self.sum_f).into_any(),
-                PyArray1::from_slice(py, &self.sum_w).into_any(),
-                count,
-            ],
-        )
-        .expect("three-element state tuple")
-    }
-
-    /// Keep the call's state only after the whole library call succeeded.
-    fn keep_state(&mut self, state: &Bound<'_, PyTuple>) -> MathResult<()> {
-        let n = self.sum_f.len();
-        let sum_f = copy_array::<f64>(&state.get_item(0).map_err(library_error)?, n)?;
-        let sum_w = copy_array::<f64>(&state.get_item(1).map_err(library_error)?, n)?;
-        let count = state.get_item(2).map_err(library_error)?;
-        let count = match &self.count {
-            None => None,
-            Some(Counts::U16(_)) => Some(Counts::U16(copy_array(&count, n)?)),
-            Some(Counts::U64(_)) => Some(Counts::U64(copy_array(&count, n)?)),
-        };
-        self.sum_f = sum_f;
-        self.sum_w = sum_w;
-        self.count = count;
-        Ok(())
+        PyTuple::new(py, [sum_f, sum_w, count]).expect("three-element state tuple")
     }
 
     fn output(&mut self, final_output: bool) -> MathResult<TileOutput> {
@@ -555,16 +763,20 @@ impl Session {
         let (_, _, _, bytes) = product_spec(&self.product)?;
         let (_worker, _scratch) = self.admit(self.call_scratch()?)?;
         let lease = MathLease::reserve(&self.runtime.budget, self.tile.shape.bytes(bytes)?)?;
+        let module = Arc::clone(&self.runtime);
+        let nbands = self.bands.len();
+        let kind = self.kind;
+        let len = self.tile.shape.len()?;
+        let product = self.product.clone();
         let planes = Python::attach(|py| -> MathResult<_> {
-            let output = self
-                .runtime
+            let output = module
                 .module
                 .bind(py)
                 .getattr("output")
                 .map_err(library_error)?
-                .call1((self.kind, self.state_arrays(py), self.bands.len()))
+                .call1((kind, self.state_arrays(py), nbands))
                 .map_err(library_error)?;
-            output_planes(&output, self.tile.shape.len()?, &self.product)
+            output_planes(&output, len, &product)
         })?;
         self.control.check()?;
         TileOutput::from_library(self.tile, self.product.clone(), planes, lease)
@@ -628,52 +840,7 @@ impl MathSession for Session {
             &self.runtime.budget,
             Geometry::required_bytes(self.tile, native)?,
         )?;
-        let indices = Python::attach(|py| -> MathResult<_> {
-            let spec = wcs_dict(py, native)?;
-            let window_dict = PyDict::new(py);
-            window_dict
-                .set_item("x", window.origin[0])
-                .map_err(library_error)?;
-            window_dict
-                .set_item("y", window.origin[1])
-                .map_err(library_error)?;
-            window_dict
-                .set_item("width", window.shape.width)
-                .map_err(library_error)?;
-            window_dict
-                .set_item("height", window.shape.height)
-                .map_err(library_error)?;
-            let grid = PyDict::new(py);
-            for (key, value) in [
-                ("ra", target.ra),
-                ("dec", target.dec),
-                ("scale", target.scale_deg),
-            ] {
-                grid.set_item(key, value).map_err(library_error)?;
-            }
-            grid.set_item("width", target.shape.width)
-                .map_err(library_error)?;
-            grid.set_item("height", target.shape.height)
-                .map_err(library_error)?;
-            let tile = PyDict::new(py);
-            tile.set_item("x", self.tile.x).map_err(library_error)?;
-            tile.set_item("y", self.tile.y).map_err(library_error)?;
-            tile.set_item("width", self.tile.shape.width)
-                .map_err(library_error)?;
-            tile.set_item("height", self.tile.shape.height)
-                .map_err(library_error)?;
-            tile.set_item("png", self.tile.order == RasterOrder::Png)
-                .map_err(library_error)?;
-            let result = self
-                .runtime
-                .module
-                .bind(py)
-                .getattr("geometry")
-                .map_err(library_error)?
-                .call1((spec, window_dict, grid, tile))
-                .map_err(|e| MathError::Transform(e.to_string()))?;
-            copy_array(&result, self.tile.shape.len()?)
-        })?;
+        let indices = self.indices(native, window, target)?;
         self.control.check()?;
         Geometry::from_library(self.tile, window, native.clone(), target, indices, lease)
     }
@@ -706,6 +873,10 @@ impl MathSession for Session {
             }
             _ => bands.to_vec(),
         };
+        if geometry.indices().iter().all(|index| *index < 0) {
+            self.last_order = Some(order);
+            return self.control.check();
+        }
         let policy = match (&self.product, mask) {
             (Product::Depth { .. }, _) | (_, MaskPolicy::Spectrum) => "spectrum",
             (_, MaskPolicy::None) => "none",
@@ -715,6 +886,7 @@ impl MathSession for Session {
         // Python sees the pinned native planes and geometry in place; only the
         // tile-sized gathers it makes from them are scratch.
         let (_worker, _scratch) = self.admit(self.call_scratch()?)?;
+        let module = Arc::clone(&self.runtime);
         Python::attach(|py| -> MathResult<()> {
             let planes = input.planes();
             let image = pinned_view(py, &planes.image, input.clone())?;
@@ -736,7 +908,7 @@ impl MathSession for Session {
                 flags_spec.set_item(name, value).map_err(library_error)?;
             }
             let state = self.state_arrays(py);
-            self.runtime
+            module
                 .module
                 .bind(py)
                 .getattr("accumulate")
@@ -756,7 +928,7 @@ impl MathSession for Session {
                     selected,
                 ))
                 .map_err(library_error)?;
-            self.keep_state(&state)
+            Ok(())
         })?;
         self.last_order = Some(order);
         self.control.check()
@@ -779,6 +951,7 @@ impl MathSession for Session {
         }
         let band = *band;
         let (_worker, _scratch) = self.admit(self.call_scratch()? + self.tile.shape.bytes(24)?)?;
+        let module = Arc::clone(&self.runtime);
         Python::attach(|py| -> MathResult<()> {
             let Values::F64(value) = &depth.planes().value else {
                 return Err(MathError::Input("depth f64".into()));
@@ -793,14 +966,14 @@ impl MathSession for Session {
             let variance = readonly(py, variance.clone())?;
             let counts = readonly(py, counts.clone())?;
             let state = self.state_arrays(py);
-            self.runtime
+            module
                 .module
                 .bind(py)
                 .getattr("add_band")
                 .map_err(library_error)?
                 .call1((&state, value.bind(py), variance.bind(py), counts.bind(py)))
                 .map_err(library_error)?;
-            self.keep_state(&state)
+            Ok(())
         })?;
         self.added.push(band);
         self.control.check()

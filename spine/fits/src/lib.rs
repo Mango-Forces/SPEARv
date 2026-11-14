@@ -1052,6 +1052,11 @@ impl Fits {
     pub fn is_reentrant(&self) -> bool {
         unsafe { ffi::sv_reentrant() == 1 }
     }
+    pub fn cached_pages(&self) -> std::sync::Arc<[(u64, std::sync::Arc<[u8]>)]> {
+        self.context
+            .as_ref()
+            .map_or_else(|| std::sync::Arc::from([]), |context| context.pages())
+    }
 }
 impl Drop for Fits {
     fn drop(&mut self) {

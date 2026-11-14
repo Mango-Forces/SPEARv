@@ -67,60 +67,7 @@ def nearest_fits(x):
     return np.where(x >= 0, np.floor(x + 0.5), np.ceil(x - 0.5))
 
 
-# The exact transform is solved on a lattice of target pixels and interpolated
-# between its nodes; a pixel whose nearest native pixel the interpolation error
-# could change is then solved exactly, so the result is the exact transform's.
-# _NODE is the node spacing in target pixels and _AMBIGUOUS how close to a
-# rounding boundary (native pixels) counts. The lattice is checked against
-# itself at twice the spacing, where the bilinear error of this smooth
-# transform is four times larger, so the bound on that check keeps the
-# interpolation within half of _AMBIGUOUS.
-_NODE = 16
-_CHECK = 2 * _NODE
-_AMBIGUOUS = 2e-3
-_CHECK_ERROR = 4 * (_AMBIGUOUS / 2)
-
-
-def _native(out, w, x, y):
-    ra, dec = out.all_pix2world(x, y, 1)
-    # NoConvergence is an error even when best_solution is finite.
-    px, py = w.all_world2pix(ra, dec, 1, tolerance=1e-12, maxiter=50,
-                             adaptive=False, detect_divergence=True, quiet=False)
-    if not (np.all(np.isfinite(px)) and np.all(np.isfinite(py))):
-        raise ValueError("non-finite coordinate transform")
-    return px, py
-
-
-def _bilinear(nodes, step, kx, ky):
-    # nodes is (2, rows, cols): both native axes are interpolated in one pass.
-    fx, fy = kx / step, ky / step
-    i = np.minimum(fx.astype(np.intp), nodes.shape[2] - 2)
-    j = np.minimum(fy.astype(np.intp), nodes.shape[1] - 2)
-    tx, ty = fx - i, (fy - j)[:, None]
-    rows = nodes[:, :, i] * (1 - tx)
-    rows += nodes[:, :, i + 1] * tx
-    grid = rows[:, j] * (1 - ty)
-    grid += rows[:, j + 1] * ty
-    return grid
-
-
-def _lattice(out, w, xs, ys):
-    # The exact transform solved on a lattice and interpolated between its
-    # nodes, or None when the tile is too small for one or the lattice misses
-    # its error bound.
-    width, height = xs.size, ys.size
-    if width <= _CHECK or height <= _CHECK:
-        return None
-    nx = np.arange(2 * ((width - 2) // _CHECK + 1) + 1, dtype=np.float64) * _NODE
-    ny = np.arange(2 * ((height - 2) // _CHECK + 1) + 1, dtype=np.float64) * _NODE
-    dx, dy = xs[1] - xs[0], ys[1] - ys[0]
-    nodes = np.stack(_native(out, w, *np.meshgrid(xs[0] + nx * dx, ys[0] + ny * dy)))
-    if np.max(np.abs(_bilinear(nodes[:, ::2, ::2], _CHECK, nx, ny) - nodes)) > _CHECK_ERROR:
-        return None
-    return _bilinear(nodes, _NODE, np.arange(width, dtype=np.float64), np.arange(height, dtype=np.float64))
-
-
-def geometry(spec, window, target, tile):
+def _frames(spec, target, tile):
     w = _wcs(spec)  # Independent mutable WCS for this call/session.
     out = WCS(naxis=2)
     out.wcs.crpix = [(target["width"] + 1) / 2, (target["height"] + 1) / 2]
@@ -134,54 +81,82 @@ def geometry(spec, window, target, tile):
     ys = np.arange(tile["height"], dtype=np.float64) + tile["y"] + 1
     if tile["png"]:
         ys = target["height"] + 1 - ys
-    # The native pixels this window can select.
-    first = (max(window["x"], 1), max(window["y"], 1))
-    last = (min(window["x"] + window["width"] - 1, spec["naxis"][0]),
-            min(window["y"] + window["height"] - 1, spec["naxis"][1]))
-    positions = _lattice(out, w, xs, ys)
-    interpolated = positions is not None
-    if not interpolated:
-        positions = np.stack(_native(out, w, *np.meshgrid(xs, ys)))
-    # floor(x + 0.5) is nearest_fits for every position a window can select.
-    positions += 0.5
-    nearest = np.floor(positions)
-    if interpolated:
-        # A position this close to a rounding boundary may round the other way
-        # under the exact transform, so it is solved exactly. One native pixel
-        # of margin keeps the pixels such a solve could bring into the window.
-        positions -= nearest
-        positions -= 0.5
-        np.abs(positions, out=positions)
-        near = positions[0] > 0.5 - _AMBIGUOUS
-        near |= positions[1] > 0.5 - _AMBIGUOUS
-        near &= ((nearest[0] >= first[0] - 1) & (nearest[0] <= last[0] + 1)
-                 & (nearest[1] >= first[1] - 1) & (nearest[1] <= last[1] + 1))
-        rows, cols = np.divmod(np.flatnonzero(near.reshape(-1)), xs.size)
-        if rows.size:
-            exact = _native(out, w, xs[cols], ys[rows])
-            nearest[0, rows, cols], nearest[1, rows, cols] = nearest_fits(exact[0]), nearest_fits(exact[1])
-    ix, iy = nearest[0].reshape(-1), nearest[1].reshape(-1)
-    valid = (ix >= first[0]) & (ix <= last[0]) & (iy >= first[1]) & (iy <= last[1])
-    iy -= window["y"]
-    iy *= window["width"]
-    iy += ix
-    iy -= window["x"]
-    return np.where(valid, iy, -1).astype(np.int64)
+    return w, out, xs, ys
+
+
+def _native(out, w, x, y):
+    ra, dec = out.all_pix2world(x, y, 1)
+    # NoConvergence is an error even when best_solution is finite.
+    px, py = w.all_world2pix(ra, dec, 1, tolerance=1e-12, maxiter=50,
+                             adaptive=False, detect_divergence=True, quiet=False)
+    if not (np.all(np.isfinite(px)) and np.all(np.isfinite(py))):
+        raise ValueError("non-finite coordinate transform")
+    return px, py
+
+
+def geometry(spec, window, target, tile):
+    w, out, xs, ys = _frames(spec, target, tile)
+    px, py = _native(out, w, *np.meshgrid(xs, ys))
+    ix, iy = nearest_fits(px), nearest_fits(py)
+    col, row = ix - window["x"], iy - window["y"]
+    valid = ((ix >= 1) & (iy >= 1) & (ix <= spec["naxis"][0]) & (iy <= spec["naxis"][1])
+             & (col >= 0) & (row >= 0) & (col < window["width"]) & (row < window["height"]))
+    indices = np.full(px.shape, -1, dtype=np.int64)
+    indices[valid] = (row[valid] * window["width"] + col[valid]).astype(np.int64)
+    return indices.reshape(-1)
+
+
+def _bilinear(nodes, step, kx, ky):
+    fx, fy = kx / step, ky / step
+    i = np.minimum(fx.astype(np.intp), nodes.shape[2] - 2)
+    j = np.minimum(fy.astype(np.intp), nodes.shape[1] - 2)
+    tx, ty = fx - i, (fy - j)[:, None]
+    rows = nodes[:, :, i] * (1 - tx) + nodes[:, :, i + 1] * tx
+    return rows[:, j] * (1 - ty) + rows[:, j + 1] * ty
+
+
+def geometry_lattice(spec, target, tile, node, error):
+    # Exact native positions of every node-th tile pixel, row-major, for the
+    # caller to interpolate between. None when the tile is too small for a
+    # lattice or bilinear interpolation between its nodes could be off by more
+    # than `error` native pixels. That is judged on the same lattice at twice
+    # the spacing, where the error of this smooth transform is four times
+    # larger.
+    w, out, xs, ys = _frames(spec, target, tile)
+    check = 2 * node
+    if xs.size <= check or ys.size <= check:
+        return None
+    nx = np.arange(2 * ((xs.size - 2) // check + 1) + 1, dtype=np.float64) * node
+    ny = np.arange(2 * ((ys.size - 2) // check + 1) + 1, dtype=np.float64) * node
+    nodes = np.stack(_native(out, w, *np.meshgrid(xs[0] + nx * (xs[1] - xs[0]), ys[0] + ny * (ys[1] - ys[0]))))
+    if np.max(np.abs(_bilinear(nodes[:, ::2, ::2], check, nx, ny) - nodes)) > 4 * error:
+        return None
+    return nodes[0].reshape(-1), nodes[1].reshape(-1), ny.size, nx.size, (w, out, xs, ys)
+
+
+def geometry_exact(frames, cols, rows):
+    # The nearest native pixel of the listed tile pixels, by the exact transform.
+    _array(cols, "int64", cols.size)
+    _array(rows, "int64", cols.size)
+    w, out, xs, ys = frames
+    px, py = _native(out, w, xs[cols], ys[rows])
+    return nearest_fits(px), nearest_fits(py)
 
 
 def _bad(flags, bits, policy):
     if policy == "none":
         return np.zeros(flags.shape, dtype=bool)
     bit = lambda i: np.uint32(1 << i) if i < 32 else np.uint32(0)
-    ignore = bit(bits["source"]) | bit(bits["fullsample"])
-    defects = np.full(flags.shape, ~ignore, dtype=np.uint32)
-    if policy in ("composite", "delta"):
-        source = (flags & bit(bits["source"])) != 0
-        ramp = bit(bits["transient"]) | bit(bits["overflow"]) | bit(bits["sur_error"])
-        defects[source] &= ~ramp
+    source = bit(bits["source"])
+    ignore = source | bit(bits["fullsample"])
     if policy == "delta":
-        defects &= ~bit(bits["outlier"])
-    return (flags & defects) != 0
+        ignore |= bit(bits["outlier"])
+    base = ~ignore
+    if policy in ("composite", "delta"):
+        ramp = bit(bits["transient"]) | bit(bits["overflow"]) | bit(bits["sur_error"])
+        hard = base & ~ramp
+        return ((flags & hard) != 0) | (((flags & ramp) != 0) & ((flags & source) == 0))
+    return (flags & base) != 0
 
 
 # Running sums are owned and charged by Rust between calls; each call works on
@@ -214,20 +189,41 @@ def accumulate(kind, state, image, variance, zodi, flags, native_bands, validity
     _array(native_bands, "uint16", n)
     _array(validity, "bool", n)
     _array(indices, "int64", tile)
-    if np.any(indices < -1) or np.any(indices >= n):
+    if indices.size and (indices.min() < -1 or indices.max() >= n):
         raise ValueError("native index outside admitted input")
-    support = indices >= 0
-    positions = np.flatnonzero(support)
-    gather = indices[support]
+    positions = np.flatnonzero(indices >= 0)
+    if not positions.size:
+        return
+    gather = indices[positions]
     # Library owns gathering, flag masks, selection, and all image arithmetic.
+    if bands:
+        b = native_bands[gather]
+        lo, hi = min(bands), max(bands)
+        if hi - lo + 1 == len(set(bands)):
+            keep = (b >= lo) & (b <= hi)
+        else:
+            lut = np.zeros(103, dtype=bool)
+            for item in bands:
+                if 0 <= item < 102:
+                    lut[item] = True
+            keep = lut[np.minimum(b, 102)]
+        positions = positions[keep]
+        if not positions.size:
+            return
+        gather = gather[keep]
+    keep = validity[gather] & ~_bad(flags[gather], bits, policy)
+    positions = positions[keep]
+    if not positions.size:
+        return
+    gather = gather[keep]
     flux = np.subtract(image[gather], zodi[gather], dtype=np.float32)
     var = variance[gather]
-    accepted = validity[gather] & np.isfinite(flux) & np.isfinite(var) & (var > 0) & ~_bad(flags[gather], bits, policy)
-    if bands:
-        accepted &= np.isin(native_bands[gather], np.asarray(bands, dtype=np.uint16))
-    positions = positions[accepted]
-    flux = flux[accepted].astype(np.float64)
-    weight = np.reciprocal(var[accepted].astype(np.float64))
+    keep = np.isfinite(flux) & np.isfinite(var) & (var > 0)
+    positions = positions[keep]
+    if not positions.size:
+        return
+    flux = flux[keep].astype(np.float64)
+    weight = np.reciprocal(var[keep].astype(np.float64))
     if kind == "depth" and np.any(count[positions] == np.iinfo(np.uint64).max):
         raise OverflowError("Specific u64 count")
     # One exposure per call, in admitted order. No exposure cube / np.mean.

@@ -525,8 +525,10 @@ struct RenderInput {
     bounds: [u32; 4],
 }
 
-/// FITS-order output bounds a cutout can reach: 33 points along each edge,
-/// widened by the resampling margin. `None` when the cutout misses the render grid.
+/// Inclusive 0-based FITS bounds `[x0, x1, y0, y1]` of the render grid a
+/// cutout can reach: 33 points along each edge, widened by the resampling
+/// margin. This is the order `TanGrid::detector_bounds` uses and
+/// [`tile_reaches`] reads. `None` when the cutout misses the render grid.
 fn render_bounds(cutout: &Cutout, grid: &TanGrid) -> Option<[u32; 4]> {
     let left = f64::from(cutout.origin_fits.0) - 0.5;
     let bottom = f64::from(cutout.origin_fits.1) - 0.5;
@@ -558,9 +560,11 @@ fn render_bounds(cutout: &Cutout, grid: &TanGrid) -> Option<[u32; 4]> {
     if x1 < x0 || y1 < y0 {
         return None;
     }
-    Some([x0 as u32, y0 as u32, x1 as u32, y1 as u32])
+    Some([x0 as u32, x1 as u32, y0 as u32, y1 as u32])
 }
 
+/// Whether bounds from [`render_bounds`] reach the PNG tile at column `x`,
+/// row `png_y`. PNG rows run down from the top; FITS rows run up.
 fn tile_reaches(bounds: [u32; 4], cols: u32, grid_height: u32, x: u32, png_y: u32) -> bool {
     let first_x = bounds[0] / TILE;
     let last_x = bounds[1] / TILE;
@@ -1161,9 +1165,19 @@ mod tests {
         );
         let view = view_of(&parse_query("ra=10&dec=20&fov_l=0.01&fov_h=0.01&mode=range&pin=40:1").unwrap()).unwrap();
         let dims = render_grid_size(view.region.fov_l_deg).unwrap();
+        let cutout = flat_cutout(view.region.ra, view.region.dec, (dims, dims), (1, 1), (dims, dims));
+        let stacked = stack_of(&ctx, vec![cutout], &view).await.unwrap();
+        assert_eq!((stacked.width, stacked.height), (dims, dims));
+        assert!(stacked.value.iter().all(|value| (value - 1.5).abs() < 1e-6), "IMAGE - ZODI through the library");
+    }
+
+    /// A flat `size` window at `origin` of a detector whose WCS is the north-up
+    /// `naxis` grid centred on `(ra, dec)`: IMAGE 2, VARIANCE 1, ZODI 0.5, band 40.
+    fn flat_cutout(ra: f64, dec: f64, naxis: (u32, u32), origin: (i32, i32), size: (u32, u32)) -> Cutout {
+        let (width, height) = size;
         let wcs = spearv_core::Wcs {
-            crpix: [(f64::from(dims) + 1.0) / 2.0; 2],
-            crval: [view.region.ra, view.region.dec],
+            crpix: [(f64::from(naxis.0) + 1.0) / 2.0, (f64::from(naxis.1) + 1.0) / 2.0],
+            crval: [ra, dec],
             cd: [[-spearv_core::PIXEL_SCALE_DEG, 0.0], [0.0, spearv_core::PIXEL_SCALE_DEG]],
             sip: spearv_core::Sip {
                 a: spearv_core::Poly::new(0),
@@ -1171,28 +1185,28 @@ mod tests {
                 ap: None,
                 bp: None,
             },
-            naxis: [dims as i32, dims as i32],
+            naxis: [naxis.0 as i32, naxis.1 as i32],
         };
-        let plane = |value: f32| spearv_core::Plane { width: dims, height: dims, data: vec![value; (dims * dims) as usize] };
-        let cutout = Cutout {
+        let plane = |value: f32| spearv_core::Plane { width, height, data: vec![value; (width * height) as usize] };
+        Cutout {
             image: plane(2.0),
             variance: plane(1.0),
             flags: spearv_core::Plane {
-                width: dims,
-                height: dims,
-                data: vec![0; (dims * dims) as usize],
+                width,
+                height,
+                data: vec![0; (width * height) as usize],
             },
             zodi: Some(plane(0.5)),
             wcs,
             wavelength: spearv_core::WavelengthMap {
-                x: vec![1.0, f64::from(dims)],
-                y: vec![1.0, f64::from(dims)],
+                x: vec![1.0, f64::from(naxis.0)],
+                y: vec![1.0, f64::from(naxis.1)],
                 wavelength: vec![BANDS[40].center_um as f32; 4],
                 bandwidth: vec![0.01; 4],
                 nx: 2,
                 ny: 2,
             },
-            origin_fits: (1, 1),
+            origin_fits: origin,
             flags_valid: None,
             clipped: false,
             flag_bits: spearv_core::FlagBits {
@@ -1207,10 +1221,34 @@ mod tests {
             },
             bytes_read: 0,
             s3_requests: 0,
-        };
-        let stacked = stack_of(&ctx, vec![cutout], &view).await.unwrap();
-        assert_eq!((stacked.width, stacked.height), (dims, dims));
-        assert!(stacked.value.iter().all(|value| (value - 1.5).abs() < 1e-6), "IMAGE - ZODI through the library");
+        }
+    }
+
+    /// Wider than tall, so bounds read in the wrong order would select the
+    /// wrong tiles or index PNG rows by a column past the grid's height.
+    #[test]
+    fn render_bounds_select_exactly_the_tiles_a_cutout_reaches() {
+        let grid = TanGrid::new_rect(10.0, 20.0, 600.0 * PIXEL_SCALE_DEG, 300.0 * PIXEL_SCALE_DEG);
+        assert_eq!((grid.width, grid.height), (600, 300));
+        let (cols, rows) = (600_u32.div_ceil(TILE), 300_u32.div_ceil(TILE));
+
+        let whole = render_bounds(&flat_cutout(10.0, 20.0, (600, 300), (1, 1), (600, 300)), &grid).expect("on the grid");
+        assert_eq!(whole, [0, 599, 0, 299]);
+        for png_y in 0..rows {
+            for x in 0..cols {
+                assert!(tile_reaches(whole, cols, 300, x, png_y), "tile {x},{png_y} is covered");
+            }
+        }
+
+        // FITS row 1 is the bottom of the picture: the last PNG tile row.
+        let corner = render_bounds(&flat_cutout(10.0, 20.0, (600, 300), (1, 1), (10, 10)), &grid).expect("on the grid");
+        let reached = (0..rows)
+            .flat_map(|png_y| (0..cols).map(move |x| (x, png_y)))
+            .filter(|&(x, png_y)| tile_reaches(corner, cols, 300, x, png_y))
+            .collect::<Vec<_>>();
+        assert_eq!(reached, [(0, rows - 1)]);
+
+        assert!(render_bounds(&flat_cutout(10.0, 20.0, (600, 300), (2000, 1), (10, 10)), &grid).is_none());
     }
 
     #[test]

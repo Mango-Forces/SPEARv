@@ -46,7 +46,7 @@ export class RawClient {
   cancel() {
     if (this.snapshot.state.phase === "ready") return
     this.stop()
-    this.publish({ state: { phase: "idle" } })
+    this.publish({ state: { phase: "idle" }, ...this.serverImageGate() })
   }
   retry() { this.stop(); void this.prepare() }
   async prepare() {
@@ -173,6 +173,16 @@ export class RawClient {
     this.publish({ state: { phase: "unavailable", reason: interrupted
       ? `${detail} Export waits for a complete retry.`
       : `${detail} The server image is unchanged.` },
-      ...(interrupted ? { gate: { ...this.snapshot.gate, exportReady: false, remapBusy: true, label: "Local layers unavailable — export waits for a complete retry" } } : {}) })
+      ...(interrupted ? { gate: { ...this.snapshot.gate, exportReady: false, remapBusy: true, label: "Local layers unavailable — export waits for a complete retry" } } : this.serverImageGate()) })
+  }
+  /** Loading closes export, but nothing reaches the canvas before the first
+   * render. A stopped load that never painted leaves the completed Composite
+   * server image on screen, so export reopens for it. Color and any painted
+   * or interrupted local mix keep their gate. */
+  private serverImageGate(): Partial<RawSnapshot> {
+    const gate = this.snapshot.gate
+    const local = this.expected.channels === 3 || this.snapshot.metadata?.source_recipe.mode === "color"
+    if (local || gate.remapBusy || gate.completedRevision !== 0) return {}
+    return { gate: serverGate(true) }
   }
 }

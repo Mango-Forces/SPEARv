@@ -116,14 +116,18 @@ pub const BANDS: [Band; 102] = [
 /// Band containing this wavelength, if it falls in a standard interval.
 /// Overlapping intervals are broken by the nearest band center.
 pub fn band_of(wavelength_um: f64) -> Option<u16> {
+    if !wavelength_um.is_finite() {
+        return None;
+    }
+    let start = BANDS.partition_point(|band| band.wl_max_um < wavelength_um);
     let mut best: Option<(u16, f64)> = None;
-    for (i, band) in BANDS.iter().enumerate() {
-        if wavelength_um < band.wl_min_um || wavelength_um > band.wl_max_um {
-            continue;
+    for (offset, band) in BANDS[start..].iter().enumerate() {
+        if wavelength_um < band.wl_min_um {
+            break;
         }
         let distance = (wavelength_um - band.center_um).abs();
         if best.is_none_or(|(_, d)| distance < d) {
-            best = Some((i as u16, distance));
+            best = Some(((start + offset) as u16, distance));
         }
     }
     best.map(|(i, _)| i)

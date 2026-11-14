@@ -119,6 +119,12 @@ pub trait ReadAt: Send + Sync + 'static {
         cancel: &Cancellation,
         trace: &ReadTrace,
     ) -> Result<Vec<u8>>;
+
+    /// Pages of this object already read under the same validator and size.
+    /// They stay pinned in the handle cache and count against `cache_bytes`.
+    fn cached_pages(&self) -> Arc<[(u64, Arc<[u8]>)]> {
+        Arc::from([])
+    }
 }
 
 /// Per-handle counters, not subtraction of a shared source counter.
@@ -135,7 +141,7 @@ pub struct IoStats {
 }
 struct Cursor {
     position: u64,
-    pages: VecDeque<(u64, Vec<u8>)>,
+    pages: VecDeque<(u64, Arc<[u8]>, bool)>,
     stats: IoStats,
 }
 pub(crate) struct Context {
@@ -169,6 +175,25 @@ impl Context {
         let id = NEXT
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
             .map_err(|_| Error::Bounds("native driver handle space exhausted".into()))?;
+        let cached = reader.cached_pages();
+        let mut pages = VecDeque::with_capacity(cached.len());
+        let mut resident_bytes = 0usize;
+        for (offset, bytes) in cached.iter() {
+            if bytes.is_empty()
+                || offset
+                    .checked_add(bytes.len() as u64)
+                    .is_none_or(|end| end > size)
+                || resident_bytes
+                    .checked_add(bytes.len())
+                    .is_none_or(|n| n > cache_bytes)
+            {
+                return Err(Error::Bounds(
+                    "cached page exceeds object or cache bounds".into(),
+                ));
+            }
+            resident_bytes += bytes.len();
+            pages.push_back((*offset, Arc::clone(bytes), true));
+        }
         let context = Arc::new(Self {
             id,
             size,
@@ -179,8 +204,12 @@ impl Context {
             cache_bytes,
             cursor: Mutex::new(Cursor {
                 position: 0,
-                pages: VecDeque::new(),
-                stats: IoStats::default(),
+                pages,
+                stats: IoStats {
+                    resident_bytes,
+                    peak_resident_bytes: resident_bytes,
+                    ..IoStats::default()
+                },
             }),
             cause: Mutex::new(None),
             opened: AtomicBool::new(false),
@@ -222,6 +251,16 @@ impl Context {
         stats.transferred_bytes = self.trace.bytes.load(Ordering::Relaxed);
         stats
     }
+    pub fn pages(&self) -> Arc<[(u64, Arc<[u8]>)]> {
+        self.cursor
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .pages
+            .iter()
+            .map(|(offset, bytes, _)| (*offset, Arc::clone(bytes)))
+            .collect::<Vec<_>>()
+            .into()
+    }
     pub fn take_cause(&self) -> Option<Error> {
         self.cause.lock().unwrap_or_else(|p| p.into_inner()).take()
     }
@@ -244,21 +283,35 @@ impl Context {
         let mut copied = 0;
         while cursor.position < end {
             self.cancel.check()?;
-            let start = cursor.position / self.page_bytes as u64 * self.page_bytes as u64;
-            let index = cursor.pages.iter().position(|(offset, _)| *offset == start);
+            let index = cursor.pages.iter().position(|(offset, bytes, _)| {
+                *offset <= cursor.position && cursor.position < *offset + bytes.len() as u64
+            });
             let index = match index {
                 Some(index) => {
                     cursor.stats.cache_hits += 1;
                     index
                 }
                 None => {
-                    let len = (self.size - start).min(self.page_bytes as u64) as usize;
+                    let start = cursor.position;
+                    let next = cursor
+                        .pages
+                        .iter()
+                        .map(|(offset, _, _)| *offset)
+                        .filter(|offset| *offset > start)
+                        .min()
+                        .unwrap_or(self.size);
+                    let len = (next - start).min(self.page_bytes as u64) as usize;
                     while cursor.stats.resident_bytes + len > self.cache_bytes {
-                        let (_, old) = cursor
+                        let victim = cursor
                             .pages
-                            .pop_front()
+                            .iter()
+                            .position(|(_, _, pinned)| !*pinned)
+                            .unwrap_or(0);
+                        let (_, old, _) = cursor
+                            .pages
+                            .remove(victim)
                             .ok_or_else(|| Error::Bounds("cache cannot hold a page".into()))?;
-                        cursor.stats.resident_bytes -= old.capacity();
+                        cursor.stats.resident_bytes -= old.len();
                     }
                     cursor.stats.backing_reads += 1;
                     let bytes = self.runtime.block_on(self.cancel.wait(self.reader.read_at(
@@ -276,24 +329,31 @@ impl Context {
                             "reader allocation exceeds admitted page capacity".into(),
                         ));
                     }
-                    while cursor.stats.resident_bytes + bytes.capacity() > self.cache_bytes {
-                        let (_, old) = cursor.pages.pop_front().ok_or_else(|| {
+                    let bytes: Arc<[u8]> = bytes.into();
+                    while cursor.stats.resident_bytes + bytes.len() > self.cache_bytes {
+                        let victim = cursor
+                            .pages
+                            .iter()
+                            .position(|(_, _, pinned)| !*pinned)
+                            .unwrap_or(0);
+                        let (_, old, _) = cursor.pages.remove(victim).ok_or_else(|| {
                             Error::Bounds("cache cannot hold reader allocation".into())
                         })?;
-                        cursor.stats.resident_bytes -= old.capacity();
+                        cursor.stats.resident_bytes -= old.len();
                     }
-                    cursor.stats.resident_bytes += bytes.capacity();
+                    cursor.stats.resident_bytes += bytes.len();
                     cursor.stats.peak_resident_bytes = cursor
                         .stats
                         .peak_resident_bytes
                         .max(cursor.stats.resident_bytes);
-                    cursor.pages.push_back((start, bytes));
+                    cursor.pages.push_back((start, bytes, false));
                     cursor.pages.len() - 1
                 }
             };
+            let (start, ref page, _) = cursor.pages[index];
             let offset = (cursor.position - start) as usize;
-            let n = (output.len() - copied).min(cursor.pages[index].1.len() - offset);
-            output[copied..copied + n].copy_from_slice(&cursor.pages[index].1[offset..offset + n]);
+            let n = (output.len() - copied).min(page.len() - offset);
+            output[copied..copied + n].copy_from_slice(&page[offset..offset + n]);
             cursor.position += n as u64;
             copied += n;
         }

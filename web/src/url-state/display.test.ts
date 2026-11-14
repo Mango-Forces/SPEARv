@@ -199,7 +199,7 @@ describe("loader and completed revision gate", () => {
     assert.equal(client.getSnapshot().gate.exportReady, true)
     client.dispose()
   })
-  it("requires informed opt-in above 2048²; cancellation and old generations never paint", { todo: "RawClient opens 12 tile fetch lanes above 400 tiles; this case expects 4" }, async () => {
+  it("requires informed opt-in above 2048²; cancellation and old generations never paint", async () => {
     const metadata = md(5854, 5854); const canvas = fakeCanvas(); const port = fakePort(); let requests = 0, signal
     const client = new RawClient(canvas, { id: "fixture", width: 5854, height: 5854, channels: 1 }, DEFAULT_DISPLAY, () => {}, async (url, options) => {
       requests++; signal = options.signal
@@ -208,13 +208,16 @@ describe("loader and completed revision gate", () => {
     }, () => port)
     await client.prepare(); assert.equal(requests, 1); assert.equal(client.getSnapshot().state.estimateBytes, 137077264)
     assert.equal(client.getSnapshot().gate.exportReady, true)
-    client.start(); await until(() => requests === 5); const session = port.messages[0].session
+    // 23×23 tiles is above 400, so the loader opens 12 fetch lanes.
+    client.start(); await until(() => requests === 13); assert.equal(client.getSnapshot().gate.exportReady, false); const session = port.messages[0].session
     client.cancel(); assert.equal(signal.aborted, true); assert.equal(port.terminated, true)
+    // Nothing was painted, so the server image is still on screen and downloadable.
+    assert.equal(client.getSnapshot().gate.exportReady, true)
     port.emit({ type: "load-ready", session }); port.emit({ type: "render-complete", session, revision: 1 })
     assert.equal(canvas.painted.length, 0); assert.equal(client.getSnapshot().state.phase, "idle")
     client.dispose()
   })
-  it("a 404 in the middle of a load disposes the partial store and paints nothing", { todo: "RawClient leaves server-image export closed after a failed tile load; decide whether failure reopens it" }, async () => {
+  it("a 404 in the middle of a load disposes the partial store and paints nothing", async () => {
     const canvas = fakeCanvas(), port = fakePort(); let requests = 0
     const client = new RawClient(canvas, { id: "fixture", width: 1025, height: 1 }, DEFAULT_DISPLAY, () => {}, async (url) => {
       requests++
@@ -229,7 +232,7 @@ describe("loader and completed revision gate", () => {
     assert.equal(canvas.painted.length, 0); assert.equal(port.terminated, true)
     client.dispose()
   })
-  it("invalid lengths, HTTP 404/409/410, and bad metadata keep the server image", { todo: "RawClient leaves server-image export closed after a failed tile load; decide whether failure reopens it" }, async () => {
+  it("invalid lengths, HTTP 404/409/410, and bad metadata keep the server image", async () => {
     for (const status of [200, 404, 409, 410]) {
       const canvas = fakeCanvas(), port = fakePort()
       const client = new RawClient(canvas, { id: "fixture", width: 1, height: 1 }, DEFAULT_DISPLAY, () => {}, async (url) => url.endsWith("raw-metadata") ? Response.json(md()) : new Response(new Uint8Array(3), { status }), () => port)

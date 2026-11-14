@@ -17,7 +17,11 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 const RENDER_SECONDS: u64 = 45;
-const READ_CONCURRENCY: usize = 8;
+/// Cutout reads in flight for one click. Each read is a 0.02 degree window, a
+/// few small HTTP ranges, so the wall time is request latency, not bytes. At 8,
+/// a 130-exposure point waits through about 17 serial rounds against the 45s
+/// deadline; 32 keeps it to about 5 while each in-flight read stays small.
+const READ_CONCURRENCY: usize = 32;
 const MEANING: &str = "Each point is the nearest detector pixel, not an aperture sum.";
 
 /// Samples one request may hand to the library. The runtime keeps its own

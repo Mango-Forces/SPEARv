@@ -796,10 +796,12 @@ impl Job {
             let Values::F32(plane) = &output.planes().value else {
                 continue;
             };
+            let mut seen = 0usize;
             for value in plane.iter().filter(|value| value.is_finite()) {
-                if values.len() % step == 0 {
+                if seen % step == 0 {
                     values.push(if delta { value.abs() } else { *value });
                 }
+                seen += 1;
             }
         }
         values
@@ -811,26 +813,35 @@ impl Job {
         let pixels = self.grid.width as usize * self.grid.height as usize;
         {
             let mut progress = self.lock();
-            if progress.estimated.is_some_and(|at| now.duration_since(at) < DIRTY_EVERY) {
+            let missing = (0..self.stretches())
+                .any(|slot| progress.channels[slot].stretch.is_none() && progress.channels[slot].valid > 0);
+            if !missing && progress.estimated.is_some_and(|at| now.duration_since(at) < DIRTY_EVERY) {
                 return;
             }
             progress.estimated = Some(now);
         }
         let step = (pixels / ESTIMATE_SAMPLES).max(1) | 1;
-        let mut locked_any = false;
+        let mut redraw = false;
         for slot in 0..self.stretches() {
             if self.lock().channels[slot].locked {
                 continue;
             }
             if let Some(stretch) = stretch_of(self.recipe.display, self.stretch_values(slot, step)) {
-                self.lock().channels[slot].stretch = Some(stretch);
+                let mut progress = self.lock();
+                if progress.channels[slot].stretch.is_none() {
+                    redraw = true;
+                }
+                progress.channels[slot].stretch = Some(stretch);
             }
-            if self.lock().channels[slot].valid as f64 >= pixels as f64 * LOCK_FRACTION {
-                self.lock().channels[slot].locked = true;
-                locked_any = true;
+            let mut progress = self.lock();
+            if progress.channels[slot].stretch.is_some()
+                && progress.channels[slot].valid as f64 >= pixels as f64 * LOCK_FRACTION
+            {
+                progress.channels[slot].locked = true;
+                redraw = true;
             }
         }
-        if locked_any {
+        if redraw {
             self.lock()
                 .tiles
                 .iter_mut()
@@ -1740,10 +1751,28 @@ async fn read_one(job: Arc<Job>, source: Arc<dyn ImageSource>, plan: Planned, sp
         MaskPolicy::Composite
     };
     let target = job.target();
-    for tile in &plan.tiles {
-        let mut guard = job.sessions[job.session_index(plan.channel, *tile)].lock().await;
+    let mut pending = plan.tiles.clone();
+    while !pending.is_empty() {
+        let mut chosen = None;
+        for (index, tile) in pending.iter().copied().enumerate() {
+            if let Ok(guard) = job.sessions[job.session_index(plan.channel, tile)].try_lock() {
+                chosen = Some((index, tile, guard));
+                break;
+            }
+        }
+        let (tile, mut guard) = match chosen {
+            Some((index, tile, guard)) => {
+                pending.swap_remove(index);
+                (tile, guard)
+            }
+            None => {
+                let tile = pending.swap_remove(0);
+                let guard = job.sessions[job.session_index(plan.channel, tile)].lock().await;
+                (tile, guard)
+            }
+        };
         if guard.is_none() {
-            match job.math.session(job.control.clone(), job.tile_of(*tile), Product::Values) {
+            match job.math.session(job.control.clone(), job.tile_of(tile), Product::Values) {
                 Ok(session) => *guard = Some(session),
                 Err(error) => {
                     drop(guard);
@@ -1781,15 +1810,17 @@ async fn read_one(job: Arc<Job>, source: Arc<dyn ImageSource>, plan: Planned, sp
                 return job.fail_fatal(&error);
             }
         }
+        job.refresh_stretch(Instant::now());
+        job.mark_settled(&settled);
     } else {
         for tile in &finished {
             if let Err(error) = job.finalize_channel(plan.channel, *tile).await {
                 return job.fail_fatal(&error);
             }
         }
+        job.refresh_stretch(Instant::now());
+        job.mark_settled(&finished);
     }
-    job.mark_settled(&settled);
-    job.refresh_stretch(Instant::now());
     job.merge_nanos
         .fetch_add(merging.elapsed().as_nanos() as u64, Ordering::Relaxed);
 }

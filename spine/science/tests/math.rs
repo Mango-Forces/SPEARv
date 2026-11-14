@@ -693,6 +693,78 @@ fn retained_qr2_qr3_library_geometry_matches_independent_header_oracle() {
     }
 }
 
+/// A tile small enough is solved exactly pixel by pixel, so the lattice path of
+/// a full tile must select what its exact 32 px pieces select.
+#[test]
+fn a_lattice_tile_selects_the_exact_transforms_pixels() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/retained_geometry.json")).unwrap();
+    let window = NativeWindow {
+        shape: Shape {
+            width: 2040,
+            height: 900,
+        },
+        origin: [1, 201],
+    };
+    let mut selected = 0;
+    for case in fixture["cases"].as_array().unwrap() {
+        let native: Wcs = serde_json::from_value(case["wcs"].clone()).unwrap();
+        for scale in [1.0, 0.3] {
+            let grid = TargetGrid {
+                ra: native.crval[0] + 0.4,
+                dec: native.crval[1] - 0.3,
+                shape: Shape {
+                    width: 3512,
+                    height: 3300,
+                },
+                scale_deg: spearv_core::PIXEL_SCALE_DEG * scale,
+            };
+            let indices = |x, y, width, height, order| {
+                let tile = Tile {
+                    x,
+                    y,
+                    shape: Shape { width, height },
+                    order,
+                };
+                runtime()
+                    .session(control(), tile, Product::Values)
+                    .unwrap()
+                    .geometry(&native, window, grid)
+                    .unwrap()
+                    .indices()
+                    .to_vec()
+            };
+            for (x, y, width, height, order) in [
+                (1536, 1536, 256, 256, RasterOrder::Png),
+                (1280, 1792, 256, 184, RasterOrder::Fits),
+                (2304, 1024, 200, 256, RasterOrder::Png),
+                (600, 2400, 184, 228, RasterOrder::Fits),
+            ] {
+                let lattice = indices(x, y, width, height, order);
+                for top in (0..height).step_by(32) {
+                    for left in (0..width).step_by(32) {
+                        let (w, h) = (32.min(width - left), 32.min(height - top));
+                        let exact = indices(x + left, y + top, w, h, order);
+                        for row in 0..h {
+                            let at = ((top + row) * width + left) as usize;
+                            let piece = (row * w) as usize;
+                            assert_eq!(
+                                lattice[at..at + w as usize],
+                                exact[piece..piece + w as usize],
+                                "{} tile {x},{y} row {}",
+                                case["release"],
+                                top + row
+                            );
+                        }
+                        selected += exact.iter().filter(|index| **index >= 0).count();
+                    }
+                }
+            }
+        }
+    }
+    assert!(selected > 100_000, "the tiles must overlap the native window");
+}
+
 #[test]
 fn singular_transform_is_an_error_not_finite_nodata() {
     let shape = Shape {

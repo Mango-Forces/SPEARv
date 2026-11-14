@@ -218,6 +218,14 @@ impl PartitionFile {
         } else {
             tail
         };
+        // A footer length past the start of the file would underflow below.
+        if needed > tail.len() as u64 {
+            return Err(Error::Upstream(format!(
+                "{}: footer claims {needed} bytes, file has {}",
+                self.path(),
+                tail.len()
+            )));
+        }
         let end = tail.len() - 8;
         let start = tail.len() - needed as usize;
         ParquetMetaDataReader::decode_metadata(&tail[start..end]).map_err(upstream)

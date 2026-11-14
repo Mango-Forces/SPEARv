@@ -334,9 +334,9 @@ fn tiles_of(cutout: &Cutout, grid: &TanGrid) -> Vec<(u32, u32)> {
 
 /// Inclusive 0-based grid bounds a cutout can reach.
 ///
-/// The rectangle grows by a pixel, its edges are walked so SIP distortion and
-/// rotation stay inside the box, and the margin covers nearest-pixel
-/// rounding. `None` when the cutout misses the grid.
+/// The cutout rectangle's edges are walked so SIP distortion and rotation
+/// stay inside the box, and a two-pixel grid margin on each side covers
+/// nearest-pixel rounding. `None` when the cutout misses the grid.
 fn footprint(cutout: &Cutout, grid: &TanGrid) -> Option<(u32, u32, u32, u32)> {
     let left = f64::from(cutout.origin_fits.0) - 0.5;
     let bottom = f64::from(cutout.origin_fits.1) - 0.5;

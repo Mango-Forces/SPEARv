@@ -149,6 +149,11 @@ fn openapi(extensions: &[&dyn Extension]) -> OpenApi {
 }
 
 /// Start every extension, serve until `signal`, then shut every extension down once.
+///
+/// Extensions stop as soon as `signal` fires, before open connections drain, so
+/// a slow client streaming a large PNG cannot hold display producers and their
+/// owned cache files past a supervisor's kill timeout. Unlinked files stay
+/// readable through descriptors that are already open.
 async fn serve(
     extensions: &[&dyn Extension],
     ctx: Arc<Context>,
@@ -181,15 +186,36 @@ async fn serve(
             },
         ))
     });
-    let result = axum::serve(listener, app).with_graceful_shutdown(signal).await;
+    let (drain, drained) = tokio::sync::oneshot::channel::<()>();
+    let server = std::future::IntoFuture::into_future(axum::serve(listener, app).with_graceful_shutdown(async move {
+        let _ = drained.await;
+    }));
+    tokio::pin!(server);
+    tokio::pin!(signal);
+    let mut stopped = false;
+    let result = tokio::select! {
+        result = &mut server => result,
+        () = &mut signal => {
+            shut_down(extensions).await;
+            stopped = true;
+            let _ = drain.send(());
+            (&mut server).await
+        }
+    };
     drop(stop_watch);
     if let Some(watcher) = watcher {
         let _ = watcher.await;
     }
+    if !stopped {
+        shut_down(extensions).await;
+    }
+    result
+}
+
+async fn shut_down(extensions: &[&dyn Extension]) {
     for extension in extensions {
         extension.shutdown().await;
     }
-    result
 }
 
 /// How often the binder asks the index whether its exposures changed.

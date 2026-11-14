@@ -1,4 +1,5 @@
 use std::fs::{self, File};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -53,7 +54,15 @@ impl DiskCache {
         let id = self.next_tmp.fetch_add(1, Ordering::Relaxed);
         let tmp = self.dir.join(format!("{key}.{}.{id}.tmp", std::process::id()));
         // Rename is atomic, so a reader never sees half an entry.
-        let written = fs::write(&tmp, bytes).and_then(|()| fs::rename(&tmp, self.dir.join(key)));
+        let write = || fs::write(&tmp, bytes).and_then(|()| fs::rename(&tmp, self.dir.join(key)));
+        // `open` made the directory, but a cache under ~/.cache can be wiped while
+        // the server runs. Without this every later write fails with ENOENT.
+        let written = write().or_else(|err| {
+            if err.kind() != ErrorKind::NotFound {
+                return Err(err);
+            }
+            fs::create_dir_all(&self.dir).and_then(|()| write())
+        });
         if let Err(err) = written {
             eprintln!("wise cache: cannot store {key}: {err}");
             let _ = fs::remove_file(&tmp);
@@ -154,6 +163,17 @@ mod tests {
         assert_eq!(cache.used_bytes(), 400);
         assert!(cache.get("a").is_none());
         assert!(cache.get("b").is_some());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_directory_removed_while_running_is_made_again() {
+        let dir = temp("removed");
+        let cache = DiskCache::open(&dir, 1000).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+        cache.put("a", &[1; 10]);
+        assert_eq!(cache.get("a").unwrap(), vec![1; 10]);
+        assert_eq!(cache.used_bytes(), 10);
         fs::remove_dir_all(dir).unwrap();
     }
 

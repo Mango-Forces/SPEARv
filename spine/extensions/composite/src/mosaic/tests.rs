@@ -1203,3 +1203,21 @@ fn the_color_route_and_a_mosaic_tile_use_the_same_tone() {
     assert_eq!(rgb, decoded, "color.png and the mosaic must use one tone");
     assert!(rgb.chunks(3).any(|pixel| pixel == NODATA), "all-missing stays no-data");
 }
+
+#[test]
+fn a_large_grid_progressive_stretch_samples_more_than_one_pixel() {
+    // 512 by 512 is four times ESTIMATE_SAMPLES, so refresh_stretch steps by
+    // more than one pixel and must still collect a full sample and lock a real
+    // stretch during reading.
+    let job = job(512.0);
+    publish_values(&job, 0, |x, y| (x + y) as f32 + 1.0);
+    job.refresh_stretch(Instant::now());
+    let (stretch, locked) = {
+        let progress = job.lock();
+        (progress.channels[0].stretch, progress.channels[0].locked)
+    };
+    assert!(stretch.is_some(), "progressive stretch must not stall at one sample");
+    assert!(locked, "full coverage with a valid stretch locks the channel");
+    let (_, _, layer) = job.tile_layer(0, 0, 0).unwrap();
+    assert!(layer.iter().any(|byte| *byte > 0), "progressive layer paints non-black pixels");
+}

@@ -234,7 +234,8 @@ pub mod header {
     }
 }
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -259,17 +260,54 @@ pub const ID: &str = "spherex";
 
 /// A layout is reused only for the same object content: its URL and ETag.
 type LayoutKey = (String, Option<String>);
+type HeaderPages = Arc<[(u64, Arc<[u8]>)]>;
+
+/// Maximum exposures whose 64 KiB header pages stay in RAM at once (~256 MiB).
+/// Typed metadata (`wcs`, `wavelength`, `flag_bits`, `size`, ~1 KiB) stays in
+/// `entries` for every seen exposure; evicted header pages reload from disk.
+const MEMORY_HEADER_PAGES: usize = 1024;
+
+#[derive(Default)]
+struct LayoutCache {
+    entries: HashMap<LayoutKey, Arc<Layout>>,
+    paged: VecDeque<LayoutKey>,
+}
+
+impl LayoutCache {
+    fn get(&self, key: &LayoutKey, need_pages: bool) -> Option<Arc<Layout>> {
+        let layout = self.entries.get(key)?;
+        if need_pages && layout.pages.is_empty() && key.1.is_some() && layout.size > 1024 * 1024 {
+            return None;
+        }
+        Some(Arc::clone(layout))
+    }
+
+    fn insert(&mut self, key: LayoutKey, layout: Arc<Layout>) {
+        if !layout.pages.is_empty() {
+            self.paged.retain(|k| k != &key);
+            if self.paged.len() >= MEMORY_HEADER_PAGES {
+                if let Some(oldest) = self.paged.pop_front() {
+                    if let Some(old) = self.entries.get(&oldest) {
+                        self.entries.insert(oldest, Arc::new(old.without_pages()));
+                    }
+                }
+            }
+            self.paged.push_back(key.clone());
+        }
+        self.entries.insert(key, layout);
+    }
+}
 
 pub struct SpherexSource {
     client: Client,
     index: Option<Arc<IndexClient>>,
+    cache_dir: Option<PathBuf>,
     /// Request and byte counters for the current process.
     stats: Arc<Stats>,
-    /// Typed layouts by URL and ETag, kept in memory for the life of the
-    /// source. A replaced object has a new ETag and so a new entry; a URL
-    /// without an ETag has no pinned content identity and is never written
-    /// to disk.
-    layouts: Mutex<HashMap<LayoutKey, Arc<Layout>>>,
+    /// Typed layouts by URL and ETag. A replaced object has a new ETag and so
+    /// a new entry; a URL without an ETag has no pinned content identity and
+    /// is never written to disk.
+    layouts: Mutex<LayoutCache>,
 }
 
 #[derive(Default)]
@@ -286,6 +324,7 @@ struct Layout {
     wavelength: WavelengthMap,
     flag_bits: FlagBits,
     size: u64,
+    pages: HeaderPages,
     header_bytes: u64,
     header_requests: u64,
 }
@@ -299,12 +338,20 @@ impl Layout {
             ..self.clone()
         }
     }
+
+    fn without_pages(&self) -> Self {
+        Self {
+            pages: Arc::from([]),
+            ..self.cached()
+        }
+    }
 }
 
 struct LayoutMeta {
     wcs: Wcs,
     wavelength: WavelengthMap,
     flag_bits: FlagBits,
+    pages: HeaderPages,
 }
 
 /// Per-probe request accounting. A range read is counted from the `ReadTrace`
@@ -322,6 +369,7 @@ pub struct HttpFile {
     stats: Arc<Stats>,
     etag: Option<String>,
     size_hint: Option<u64>,
+    pages: HeaderPages,
     probe: Arc<ProbeIo>,
 }
 
@@ -360,6 +408,12 @@ impl HttpFile {
 
     fn pinned(mut self, size: u64) -> Self {
         self.size_hint = Some(size);
+        self
+    }
+
+    fn pinned_with(mut self, size: u64, pages: HeaderPages) -> Self {
+        self.size_hint = Some(size);
+        self.pages = pages;
         self
     }
 
@@ -515,6 +569,10 @@ impl ReadAt for HttpFile {
             }
         }
     }
+
+    fn cached_pages(&self) -> HeaderPages {
+        Arc::clone(&self.pages)
+    }
 }
 
 /// reqwest text can include the URL; transport messages must not. Keep only
@@ -559,8 +617,9 @@ impl SpherexSource {
         Ok(Self {
             client: http_client()?,
             index: Some(index),
+            cache_dir: std::env::var_os("SPEARV_CACHE").map(PathBuf::from),
             stats: Arc::new(Stats::default()),
-            layouts: Mutex::new(HashMap::new()),
+            layouts: Mutex::new(LayoutCache::default()),
         })
     }
 
@@ -570,8 +629,9 @@ impl SpherexSource {
         Ok(Self {
             client: http_client()?,
             index: None,
+            cache_dir: std::env::var_os("SPEARV_CACHE").map(PathBuf::from),
             stats: Arc::new(Stats::default()),
-            layouts: Mutex::new(HashMap::new()),
+            layouts: Mutex::new(LayoutCache::default()),
         })
     }
 
@@ -598,6 +658,7 @@ impl SpherexSource {
             stats: Arc::clone(&self.stats),
             etag: exposure.etag.clone().filter(|etag| !etag.is_empty()),
             size_hint: exposure.size.filter(|size| *size > 0),
+            pages: Arc::from([]),
             probe: Arc::new(ProbeIo::default()),
         }
     }
@@ -636,7 +697,7 @@ impl SpherexSource {
         row: &spearv_index::ExposureRow,
     ) -> Result<ExposureGeometry> {
         let exposure = Self::exact_exposure(row)?;
-        let layout = self.layout(&exposure).await?;
+        let layout = self.layout(&exposure, false).await?;
         Ok(ExposureGeometry {
             wcs: layout.wcs.clone(),
             wavelength: layout.wavelength.clone(),
@@ -652,17 +713,40 @@ impl SpherexSource {
         window: &PixelWindow,
     ) -> Result<Cutout> {
         let exposure = Self::exact_exposure(row)?;
-        let layout = self.layout(&exposure).await?;
+        let layout = self.layout(&exposure, true).await?;
         self.read_window(&exposure, &layout, window).await
     }
 
-    async fn layout(&self, exposure: &Exposure) -> Result<Arc<Layout>> {
+    async fn layout(&self, exposure: &Exposure, need_pages: bool) -> Result<Arc<Layout>> {
         let file = self.http(exposure);
         let key = (file.url.clone(), file.etag.clone());
-        if let Some(layout) = self.layouts.lock().ok().and_then(|cache| cache.get(&key).cloned()) {
+        if let Some(layout) = self
+            .layouts
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&key, need_pages))
+        {
             return Ok(layout);
         }
+        let disk_path = match (&self.cache_dir, &file.etag, file.size_hint) {
+            (Some(dir), Some(etag), Some(size)) if size > 1024 * 1024 => {
+                Some(disk_layout_path(dir, &file.url, etag, size))
+            }
+            _ => None,
+        };
+        if let Some(path) = &disk_path {
+            if let Some(layout) = load_disk_layout(path) {
+                let layout = Arc::new(layout);
+                if let Ok(mut cache) = self.layouts.lock() {
+                    cache.insert(key, Arc::clone(&layout));
+                }
+                return Ok(layout);
+            }
+        }
         let layout = self.build_layout(file).await?;
+        if let Some(path) = &disk_path {
+            save_disk_layout(path, &layout);
+        }
         if let Ok(mut cache) = self.layouts.lock() {
             cache.insert(key, Arc::new(layout.cached()));
         }
@@ -685,11 +769,17 @@ impl SpherexSource {
         .await
         .map_err(fits_error)?;
         let meta = completed.value;
+        let pages = if file.etag.is_some() && size > 1024 * 1024 {
+            meta.pages
+        } else {
+            Arc::from([])
+        };
         Ok(Layout {
             wcs: meta.wcs,
             wavelength: meta.wavelength,
             flag_bits: meta.flag_bits,
             size,
+            pages,
             header_bytes: completed.io.transferred_bytes + probe_bytes,
             header_requests: completed.io.attempts + probe_requests,
         })
@@ -724,8 +814,8 @@ fn layout_limits() -> Limits {
         max_cards: 8192,
         max_elements: 1,
         max_column_elements: 8192,
-        page_bytes: 1024 * 1024,
-        cache_bytes: 2 * 1024 * 1024,
+        page_bytes: 64 * 1024,
+        cache_bytes: 1024 * 1024,
         native_workspace_bytes: 8 * 1024 * 1024,
     }
 }
@@ -737,7 +827,7 @@ fn cutout_limits(page_bytes: usize) -> Limits {
         max_elements: 4_194_304,
         max_column_elements: 65_536,
         page_bytes,
-        cache_bytes: page_bytes.saturating_mul(2),
+        cache_bytes: page_bytes.saturating_add(1024 * 1024),
         native_workspace_bytes: 16 * 1024 * 1024,
     }
 }
@@ -748,16 +838,108 @@ fn layout_meta(fits: &mut Fits) -> spearv_fits::Result<LayoutMeta> {
     let axes = info.axes().to_vec();
     let cards = CardMap::from_header(&fits.header()?);
     let wcs = header::sky_wcs(&cards, &axes)?;
-    let wavelength = read_wavelength(fits, &cards)?;
     fits.move_named("FLAGS", 0)?;
     let flag_bits = header::flag_bits(&CardMap::from_header(&fits.header()?));
     fits.move_named("VARIANCE", 0)?;
     fits.move_named("ZODI", 0)?;
+    let pages = fits.cached_pages();
+    let wavelength = read_wavelength(fits, &cards)?;
     Ok(LayoutMeta {
         wcs,
         wavelength,
         flag_bits,
+        pages,
     })
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DiskMeta {
+    wcs: Wcs,
+    wavelength: WavelengthMap,
+    flag_bits: FlagBits,
+    size: u64,
+}
+
+fn disk_layout_path(dir: &Path, url: &str, etag: &str, size: u64) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(format!("cfitsio-v1:{url}:{etag}:{size}").as_bytes());
+    dir.join("cfitsio-layouts-v1")
+        .join(format!("{}.bin", hex::encode(hasher.finalize())))
+}
+
+fn load_disk_layout(path: &Path) -> Option<Layout> {
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.len() < 8 {
+        return None;
+    }
+    let meta_len = u32::from_le_bytes(bytes[0..4].try_into().ok()?) as usize;
+    let mut at = 4usize.checked_add(meta_len)?;
+    let meta: DiskMeta = serde_json::from_slice(bytes.get(4..at)?).ok()?;
+    let count = u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?) as usize;
+    at += 4;
+    if count > 16 {
+        return None;
+    }
+    let mut pages = Vec::with_capacity(count);
+    for _ in 0..count {
+        let offset = u64::from_le_bytes(bytes.get(at..at + 8)?.try_into().ok()?);
+        let len = u32::from_le_bytes(bytes.get(at + 8..at + 12)?.try_into().ok()?) as usize;
+        at += 12;
+        let slice = bytes.get(at..at.checked_add(len)?)?;
+        at += len;
+        pages.push((offset, Arc::<[u8]>::from(slice)));
+    }
+    if at != bytes.len() {
+        return None;
+    }
+    Some(Layout {
+        wcs: meta.wcs,
+        wavelength: meta.wavelength,
+        flag_bits: meta.flag_bits,
+        size: meta.size,
+        pages: pages.into(),
+        header_bytes: 0,
+        header_requests: 0,
+    })
+}
+
+fn save_disk_layout(path: &Path, layout: &Layout) {
+    let Some(parent) = path.parent() else { return };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let meta = DiskMeta {
+        wcs: layout.wcs.clone(),
+        wavelength: layout.wavelength.clone(),
+        flag_bits: layout.flag_bits,
+        size: layout.size,
+    };
+    let Ok(meta_bytes) = serde_json::to_vec(&meta) else { return };
+    let Ok(meta_len) = u32::try_from(meta_bytes.len()) else { return };
+    let Ok(count) = u32::try_from(layout.pages.len()) else { return };
+    let total: usize = 8
+        + meta_bytes.len()
+        + layout.pages.iter().map(|(_, p)| 12 + p.len()).sum::<usize>();
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(&meta_len.to_le_bytes());
+    out.extend_from_slice(&meta_bytes);
+    out.extend_from_slice(&count.to_le_bytes());
+    for (offset, page) in layout.pages.iter() {
+        let Ok(len) = u32::try_from(page.len()) else { return };
+        out.extend_from_slice(&offset.to_le_bytes());
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(page);
+    }
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let tmp = path.with_extension(format!(
+        "tmp.{}.{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    if std::fs::write(&tmp, out).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
 }
 
 /// Decode the WCS-WAVE control-point table with native table reads. `TDIM`
@@ -874,36 +1056,6 @@ fn micrometers(text: &str) -> bool {
     )
 }
 
-struct CutoutMeta {
-    image: Plane<f32>,
-    variance: Plane<f32>,
-    zodi: Plane<f32>,
-    flags: Plane<u32>,
-    flags_valid: Option<Vec<bool>>,
-}
-
-fn read_cutout(fits: &mut Fits, window: Window) -> spearv_fits::Result<CutoutMeta> {
-    fits.move_named("IMAGE", 0)?;
-    let image = fits.read_f32(window, FloatMode::Automatic)?;
-    fits.move_named("VARIANCE", 0)?;
-    let variance = fits.read_f32(window, FloatMode::Automatic)?;
-    fits.move_named("ZODI", 0)?;
-    let zodi = fits.read_f32(window, FloatMode::Automatic)?;
-    fits.move_named("FLAGS", 0)?;
-    let flags = fits.read_flags(window)?;
-    let flags_valid = flags
-        .valid()
-        .contains(&0)
-        .then(|| flags.valid().iter().map(|valid| *valid != 0).collect());
-    Ok(CutoutMeta {
-        image: plane(window, image.values()),
-        variance: plane(window, variance.values()),
-        zodi: plane(window, zodi.values()),
-        flags: plane(window, flags.values()),
-        flags_valid,
-    })
-}
-
 fn plane<T: Copy>(window: Window, values: &[T]) -> Plane<T> {
     Plane {
         width: window.width as u32,
@@ -993,13 +1145,13 @@ impl ImageSource for SpherexSource {
     }
 
     async fn cutout(&self, exposure: &Exposure, region: &SkyRegion) -> Result<Cutout> {
-        let layout = self.layout(exposure).await?;
+        let layout = self.layout(exposure, true).await?;
         let window = PixelWindow::for_region(&layout.wcs, region)?;
         self.read_window(exposure, &layout, &window).await
     }
 
     async fn geometry(&self, exposure: &Exposure) -> Result<ExposureGeometry> {
-        let layout = self.layout(exposure).await?;
+        let layout = self.layout(exposure, false).await?;
         Ok(ExposureGeometry {
             wcs: layout.wcs.clone(),
             wavelength: layout.wavelength.clone(),
@@ -1008,7 +1160,7 @@ impl ImageSource for SpherexSource {
     }
 
     async fn window_cutout(&self, exposure: &Exposure, window: &PixelWindow) -> Result<Cutout> {
-        let layout = self.layout(exposure).await?;
+        let layout = self.layout(exposure, true).await?;
         self.read_window(exposure, &layout, window).await
     }
 }
@@ -1032,34 +1184,83 @@ impl SpherexSource {
         let row_bytes = u64::from(layout.wcs.naxis[0].max(1) as u32) * 4;
         let page_bytes = row_bytes
             .saturating_mul(window.height)
-            .clamp(64 * 1024, 4 * 1024 * 1024) as usize;
-        let reader: Arc<dyn ReadAt> = Arc::new(file.pinned(layout.size));
-        let completed = spearv_fits::run(
-            Input::Random {
-                size: layout.size,
-                reader,
-            },
-            FitsBudget::new(CUTOUT_BUDGET),
-            cutout_limits(page_bytes),
-            Cancellation::default(),
-            move |fits| read_cutout(fits, window),
-        )
-        .await
-        .map_err(fits_error)?;
-        let meta = completed.value;
+            .saturating_add(65_536)
+            .clamp(64 * 1024, 16 * 1024 * 1024) as usize;
+        let reader: Arc<dyn ReadAt> =
+            Arc::new(file.pinned_with(layout.size, Arc::clone(&layout.pages)));
+        let budget = FitsBudget::new(CUTOUT_BUDGET);
+        let limits = cutout_limits(page_bytes);
+        let size = layout.size;
+        let read_float = |name: &'static str| {
+            let reader = Arc::clone(&reader);
+            let budget = budget.clone();
+            let limits = limits.clone();
+            async move {
+                spearv_fits::run(
+                    Input::Random { size, reader },
+                    budget,
+                    limits,
+                    Cancellation::default(),
+                    move |fits| {
+                        fits.move_named(name, 0)?;
+                        let values = fits.read_f32(window, FloatMode::Automatic)?;
+                        Ok(plane(window, values.values()))
+                    },
+                )
+                .await
+                .map_err(fits_error)
+            }
+        };
+        let read_flags = {
+            let reader = Arc::clone(&reader);
+            let budget = budget.clone();
+            let limits = limits.clone();
+            async move {
+                spearv_fits::run(
+                    Input::Random { size, reader },
+                    budget,
+                    limits,
+                    Cancellation::default(),
+                    move |fits| {
+                        fits.move_named("FLAGS", 0)?;
+                        let flags = fits.read_flags(window)?;
+                        let valid = flags
+                            .valid()
+                            .contains(&0)
+                            .then(|| flags.valid().iter().map(|valid| *valid != 0).collect());
+                        Ok((plane(window, flags.values()), valid))
+                    },
+                )
+                .await
+                .map_err(fits_error)
+            }
+        };
+        let (image, variance, zodi, flags) = tokio::try_join!(
+            read_float("IMAGE"),
+            read_float("VARIANCE"),
+            read_float("ZODI"),
+            read_flags,
+        )?;
+        let transferred_bytes = image.io.transferred_bytes
+            + variance.io.transferred_bytes
+            + zodi.io.transferred_bytes
+            + flags.io.transferred_bytes;
+        let attempts =
+            image.io.attempts + variance.io.attempts + zodi.io.attempts + flags.io.attempts;
+        let (flags, flags_valid) = flags.value;
         Ok(Cutout {
-            image: meta.image,
-            variance: meta.variance,
-            flags: meta.flags,
-            flags_valid: meta.flags_valid,
-            zodi: Some(meta.zodi),
+            image: image.value,
+            variance: variance.value,
+            flags,
+            flags_valid,
+            zodi: Some(zodi.value),
             wcs: layout.wcs.clone(),
             wavelength: layout.wavelength.clone(),
             origin_fits: (window.x as i32 + 1, window.y as i32 + 1),
             clipped,
             flag_bits: layout.flag_bits,
-            bytes_read: layout.header_bytes + completed.io.transferred_bytes,
-            s3_requests: layout.header_requests + completed.io.attempts,
+            bytes_read: layout.header_bytes + transferred_bytes,
+            s3_requests: layout.header_requests + attempts,
         })
     }
 }
@@ -1104,6 +1305,7 @@ mod tests {
             url: format!("http://{addr}/file"),
             etag: Some("\"stale\"".into()),
             size_hint: Some(1000),
+            pages: Arc::from([]),
             probe: Arc::new(ProbeIo::default()),
         };
         let cancel = Cancellation::default();
@@ -1425,6 +1627,7 @@ mod tests {
             url: format!("http://{addr}/file"),
             etag: None,
             size_hint: Some(10),
+            pages: Arc::from([]),
             probe: Arc::new(ProbeIo::default()),
         };
         let error = file
@@ -1472,6 +1675,7 @@ mod tests {
             url: format!("http://{addr}/file"),
             etag: None,
             size_hint: Some(4),
+            pages: Arc::from([]),
             probe: Arc::new(ProbeIo::default()),
         };
         let bytes = file
@@ -1514,6 +1718,7 @@ mod tests {
             url: format!("http://{addr}/file"),
             etag: Some("\"expected\"".into()),
             size_hint: Some(4),
+            pages: Arc::from([]),
             probe: Arc::new(ProbeIo::default()),
         };
         let error = file
@@ -1535,6 +1740,7 @@ mod tests {
             url: "http://127.0.0.1:9/file".into(),
             etag: None,
             size_hint: Some(4),
+            pages: Arc::from([]),
             probe: Arc::new(ProbeIo::default()),
         };
         let error = file

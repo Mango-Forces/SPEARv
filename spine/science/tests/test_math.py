@@ -1,6 +1,5 @@
 """Bounded tests of the actual embedded backend, not copied reducer oracles."""
 import importlib.util
-import json
 import pathlib
 import unittest
 from unittest.mock import patch
@@ -82,26 +81,6 @@ class LibraryEdges(unittest.TestCase):
                 math.geometry(native, dict(x=1, y=1, width=1, height=1),
                               dict(ra=10., dec=20., width=1, height=1, scale=.001),
                               dict(x=0, y=0, width=1, height=1, png=False))
-
-    def test_interpolated_geometry_selects_the_same_pixels_as_the_exact_transform(self):
-        fixture = json.loads((pathlib.Path(__file__).parent / "fixtures" / "retained_geometry.json").read_text())
-        inside = 0
-        for case in fixture["cases"]:
-            wcs = case["wcs"]
-            native = dict(crpix=wcs["crpix"], crval=wcs["crval"], cd=wcs["cd"], naxis=[2040, 2040], **wcs["sip"])
-            window = dict(x=1, y=201, width=2040, height=900)
-            for scale in (6.15 / 3600, 1.8 / 3600):
-                target = dict(ra=wcs["crval"][0] + .4, dec=wcs["crval"][1] - .3, scale=scale, width=3512, height=3300)
-                for x, y, width, height, png in [(1536, 1536, 256, 256, True), (1280, 1792, 256, 184, False),
-                                                 (2304, 1024, 200, 256, True), (600, 2400, 184, 228, False)]:
-                    tile = dict(x=x, y=y, width=width, height=height, png=png)
-                    fast = math.geometry(native, window, target, tile)
-                    with patch.object(math, "_CHECK", 10 ** 9):
-                        exact = math.geometry(native, window, target, tile)
-                    np.testing.assert_array_equal(fast, exact)
-                    inside += int((exact >= 0).sum())
-        self.assertGreater(inside, 100000)
-
 
 if __name__ == "__main__":
     unittest.main()
