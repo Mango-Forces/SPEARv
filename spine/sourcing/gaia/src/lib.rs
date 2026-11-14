@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use motion::{circle_boxes, propagate, separation_deg, years_since, GAIA_DR3_REF_EPOCH};
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use spearv_core::{grid_size, CatalogRow, CatalogSource, Error, Result, SkyRegion, SourceId, PIXEL_SCALE_DEG};
 
 pub const SCHEMA: &str = "
@@ -55,6 +55,8 @@ pub struct CoveredField {
 pub struct GaiaStore {
     path: PathBuf,
     fields: Vec<CoveredField>,
+    all_sky: bool,
+    max_mag: Option<f64>,
     /// Fastest star in the store, so a query can reach stars that moved into it.
     max_pm_mas_yr: f64,
 }
@@ -76,10 +78,19 @@ impl GaiaStore {
             .map_err(sql)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(sql)?;
+        let all_sky = conn
+            .query_row("SELECT value FROM meta WHERE key = 'all_sky'", [], |row| row.get::<_, f64>(0))
+            .optional()
+            .map_err(sql)?
+            .is_some_and(|value| value != 0.0);
+        let max_mag = conn
+            .query_row("SELECT value FROM meta WHERE key = 'max_mag'", [], |row| row.get::<_, f64>(0))
+            .optional()
+            .map_err(sql)?;
         let max_pm_mas_yr = conn
             .query_row("SELECT value FROM meta WHERE key = 'max_pm_mas_yr'", [], |row| row.get(0))
             .map_err(sql)?;
-        Ok(Self { path, fields, max_pm_mas_yr })
+        Ok(Self { path, fields, all_sky, max_mag, max_pm_mas_yr })
     }
 
     /// Add the store at `SPEARV_GAIA` (default `data/gaia.sqlite`). The store is
@@ -99,6 +110,14 @@ impl GaiaStore {
         &self.fields
     }
 
+    pub fn is_all_sky(&self) -> bool {
+        self.all_sky
+    }
+
+    pub fn max_mag(&self) -> Option<f64> {
+        self.max_mag
+    }
+
     /// How far any stored star can travel between 2016.0 and the epoch, in degrees.
     fn reach_deg(&self, epoch_mjd: Option<f64>) -> f64 {
         let years = epoch_mjd.map_or(0.0, |mjd| years_since(GAIA_DR3_REF_EPOCH, mjd).abs());
@@ -106,9 +125,11 @@ impl GaiaStore {
     }
 
     fn covers(&self, region: &SkyRegion, radius: f64) -> bool {
-        self.fields
-            .iter()
-            .any(|field| separation_deg(field.ra, field.dec, region.ra, region.dec) + radius <= field.radius_deg)
+        self.all_sky
+            || self
+                .fields
+                .iter()
+                .any(|field| separation_deg(field.ra, field.dec, region.ra, region.dec) + radius <= field.radius_deg)
     }
 
     fn read(&self, region: &SkyRegion, radius: f64, reach: f64, epoch_mjd: Option<f64>) -> Result<Vec<CatalogRow>> {
@@ -334,5 +355,31 @@ mod tests {
         // Inside by centre, but its corners pass the edge of the field.
         assert!(matches!(gaia.cone(&view(100.9, 0.0, 0.5), None).await, Err(Error::OutsideExposure)));
         assert!(gaia.cone(&view(100.5, 0.0, 0.5), None).await.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn all_sky_store_covers_any_position_and_exposes_max_mag() {
+        let path = std::env::temp_dir().join(format!("spearv-gaia-{}-allsky.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute("INSERT INTO meta VALUES ('all_sky', 1.0)", []).unwrap();
+        conn.execute("INSERT INTO meta VALUES ('max_mag', 17.0)", []).unwrap();
+        conn.execute("INSERT INTO star VALUES (10, 266.4, -29.0, NULL, NULL, 12.5, 2016.0)", []).unwrap();
+        conn.execute("INSERT INTO star_sky VALUES (10, 266.4, 266.4, -29.0, -29.0)", []).unwrap();
+        record_max_pm(&conn).unwrap();
+        drop(conn);
+        let gaia = TempStore(GaiaStore::open(path).unwrap());
+
+        assert!(gaia.is_all_sky());
+        assert_eq!(gaia.max_mag(), Some(17.0));
+        assert!(gaia.fields().is_empty());
+
+        let gc = gaia.cone(&view(266.4, -29.0, 0.2), None).await.unwrap();
+        assert_eq!(gc.len(), 1);
+        assert_eq!(gc[0].id, "10");
+
+        let empty_sky = gaia.cone(&view(180.0, -45.0, 0.2), None).await.unwrap();
+        assert!(empty_sky.is_empty());
     }
 }

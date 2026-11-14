@@ -125,16 +125,65 @@ impl Columns {
 
     /// No column up to `last` holds a comma. Only `designation` is quoted there.
     pub fn star(&self, line: &str) -> Option<Star> {
-        let cells: Vec<&str> = line.splitn(self.last + 2, ',').collect();
-        Some(Star {
-            source_id: cells.get(self.source_id)?.parse().ok()?,
-            ra: cells.get(self.ra)?.parse().ok()?,
-            dec: cells.get(self.dec)?.parse().ok()?,
-            pmra: optional(cells.get(self.pmra)?),
-            pmdec: optional(cells.get(self.pmdec)?),
-            g: optional(cells.get(self.g)?),
-            ref_epoch: cells.get(self.ref_epoch)?.parse().ok()?,
-        })
+        self.star_filtered(line, None).ok().flatten()
+    }
+
+    /// Parse one CSV row, returning `Ok(None)` when `max_mag` is set and the row
+    /// has a finite `phot_g_mean_mag` fainter than `max_mag`. Rows with missing
+    /// `phot_g_mean_mag` are retained.
+    pub fn star_filtered(&self, line: &str, max_mag: Option<f64>) -> Result<Option<Star>, &'static str> {
+        let mut source_id = None;
+        let mut ra = None;
+        let mut dec = None;
+        let mut pmra = None;
+        let mut pmdec = None;
+        let mut g = None;
+        let mut ref_epoch = None;
+
+        for (index, cell) in line.split(',').enumerate() {
+            if index == self.source_id {
+                source_id = Some(cell);
+            } else if index == self.ra {
+                ra = Some(cell);
+            } else if index == self.dec {
+                dec = Some(cell);
+            } else if index == self.pmra {
+                pmra = Some(cell);
+            } else if index == self.pmdec {
+                pmdec = Some(cell);
+            } else if index == self.g {
+                g = Some(cell);
+            } else if index == self.ref_epoch {
+                ref_epoch = Some(cell);
+            }
+            if index == self.last {
+                break;
+            }
+        }
+
+        let g = optional(g.ok_or("missing column")?);
+        if let (Some(limit), Some(mag)) = (max_mag, g) {
+            if mag > limit {
+                return Ok(None);
+            }
+        }
+
+        let ra: f64 = ra.ok_or("missing column")?.parse().map_err(|_| "invalid ra")?;
+        let dec: f64 = dec.ok_or("missing column")?.parse().map_err(|_| "invalid dec")?;
+        let ref_epoch: f64 = ref_epoch.ok_or("missing column")?.parse().map_err(|_| "invalid ref_epoch")?;
+        if !ra.is_finite() || !dec.is_finite() || !ref_epoch.is_finite() {
+            return Err("non-finite astrometry");
+        }
+
+        Ok(Some(Star {
+            source_id: source_id.ok_or("missing column")?.parse().map_err(|_| "invalid source_id")?,
+            ra,
+            dec,
+            pmra: optional(pmra.ok_or("missing column")?),
+            pmdec: optional(pmdec.ok_or("missing column")?),
+            g,
+            ref_epoch,
+        }))
     }
 }
 
@@ -243,6 +292,18 @@ mod tests {
         let bare = columns.star(r#"163,"Gaia DR3 2512",2512,2016.0,45.07,0.11,null,null,null,x"#).unwrap();
         assert_eq!((bare.pmra, bare.pmdec, bare.g), (None, None, None));
         assert_eq!(columns.source_id("1,\"d\",77,2016.0"), Some(77));
+    }
+
+    #[test]
+    fn star_filtered_keeps_bright_and_null_and_drops_faint() {
+        let columns = Columns::from_header(HEADER).unwrap();
+        let bright = r#"163,"Gaia DR3 1",1,2016.0,45.0,0.0,1.0,-1.0,16.5,x"#;
+        let faint = r#"163,"Gaia DR3 2",2,2016.0,45.0,0.0,1.0,-1.0,17.01,x"#;
+        let null_g = r#"163,"Gaia DR3 3",3,2016.0,45.0,0.0,null,null,null,x"#;
+        assert_eq!(columns.star_filtered(bright, Some(17.0)).unwrap().unwrap().source_id, 1);
+        assert!(columns.star_filtered(faint, Some(17.0)).unwrap().is_none());
+        assert_eq!(columns.star_filtered(null_g, Some(17.0)).unwrap().unwrap().source_id, 3);
+        assert!(columns.star_filtered("163,short", Some(17.0)).is_err());
     }
 
     #[test]
