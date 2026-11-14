@@ -15,7 +15,6 @@ export function SidebarSpectrum(props: SidebarSpectrumProps) {
     <section className="spectrum-panel" aria-label="Spectrum">
       <div className="spectrum-panel-head">
         <h2>Spectrum</h2>
-        {props.release ? <span className="spectrum-panel-release">{props.release}</span> : null}
       </div>
       {props.point ? (
         <dl className="spectrum-panel-meta">
