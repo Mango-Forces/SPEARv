@@ -60,7 +60,6 @@ const EMPTY_RAW_CONTROLS: RawControlsState = {
 }
 
 const LOGO = new URL("./assets/spear-logo.svg", import.meta.url).href
-const LOGO_FALLBACK = new URL("./assets/spear-logo-transparent.png", import.meta.url).href
 const initialSidebarOpen = () => typeof window === "undefined" || !window.matchMedia("(max-width: 900px)").matches
 
 const MODES: { id: Workspace; label: string }[] = [
@@ -373,13 +372,7 @@ function ValidViewApp({ view }: { view: View }) {
       <div className="topbar-shell" data-cue={railCue}>
         <header ref={topbarRef} className="topbar">
         <a className="brand" href="/" aria-label="SPEARv home">
-          <img
-            src={LOGO}
-            alt="SPEARv"
-            onError={(event) => {
-              event.currentTarget.src = LOGO_FALLBACK
-            }}
-          />
+          <img src={LOGO} alt="SPEARv" />
         </a>
         <form id="location-form" className="location" onSubmit={submit} noValidate>
           <label className="field">
