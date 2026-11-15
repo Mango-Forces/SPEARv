@@ -136,6 +136,36 @@ export function paintOnion(
   }
 }
 
+/**
+ * Swipe compare: `a` left of the divider, `b` right of it, on one stretch and
+ * one sky grid, so catalog markers and clicks stay aligned across the split.
+ * `split` is the divider position as a fraction of the width.
+ */
+export function paintSwipe(
+  a: FramePlane,
+  b: FramePlane,
+  stretch: Stretch,
+  out: ImageData,
+  display: DisplayTone = TONE_SOFT,
+  split = 0.5,
+): void {
+  const rgb = out.data
+  const edge = Math.round(Math.min(1, Math.max(0, split)) * a.width)
+  for (let i = 0, p = 0; i < a.values.length; i++, p += 4) {
+    const x = i % a.width
+    if (x === edge && edge > 0 && edge < a.width) {
+      writeRgb(rgb, p, MOTION_RGB[0], MOTION_RGB[1], MOTION_RGB[2])
+      continue
+    }
+    const value = (x < edge ? a : b).values[i]!
+    if (!Number.isFinite(value)) {
+      writeNoData(rgb, p)
+      continue
+    }
+    writeGrey(rgb, p, tone(value, stretch, display))
+  }
+}
+
 /** Calibrated difference painted as mid-grey zero. With invert off, white is
  * brighter in `a`; invert flips that, matching WiseView difference blinks. */
 export function paintDifference(

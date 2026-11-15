@@ -27,6 +27,8 @@ export type Transport = {
   onSeek: (index: number) => void
   onRate: (rate: number) => void
   onLoop: (loop: boolean) => void
+  /** The frame console on the canvas plays the sequence; hide this row's duplicate controls. */
+  consoleOwnsPlayback?: boolean
 }
 
 export function SectorTimeline(props: { state: SectorState; dispatch: Dispatch<SectorAction>; frameStates: Map<string, string>; transport: Transport; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -64,15 +66,16 @@ export function SectorTimeline(props: { state: SectorState; dispatch: Dispatch<S
         <div className="specific-actions"><button type="button" disabled={index === 0} aria-label={`Move ${sector.name} up`} onClick={() => props.dispatch({ type: "reorder", sectorId: id, direction: -1 })}>↑ Up</button><button type="button" disabled={index === count - 1} aria-label={`Move ${sector.name} down`} onClick={() => props.dispatch({ type: "reorder", sectorId: id, direction: 1 })}>↓ Down</button></div>
       </li>
     })}</ol>
-    <div className="specific-transport" role="group" aria-label="Playback" data-state={transport.state}>
+    {!transport.consoleOwnsPlayback && <div className="specific-transport" role="group" aria-label="Playback" data-state={transport.state}>
       <button type="button" disabled={!transport.stepEnabled} onClick={() => transport.onStep(-1)}>Previous</button>
       <button type="button" disabled={!transport.ready || count < 2} onClick={transport.onPlay}>{transport.playing ? "Pause" : "Play"}</button>
       <button type="button" disabled={!transport.stepEnabled} onClick={() => transport.onStep(1)}>Next</button>
       <button type="button" aria-pressed={transport.loop} onClick={() => transport.onLoop(!transport.loop)}>Loop {transport.loop ? "on" : "off"}</button>
       <label className="specific-inline">Rate<select aria-label="Frames per second" value={transport.rate} onChange={(event) => transport.onRate(Number(event.target.value))}>{[1, 2, 4, 8].map((rate) => <option key={rate} value={rate}>{rate} fps</option>)}</select></label>
-    </div>
+    </div>}
+    {transport.consoleOwnsPlayback && transport.ready && <p className="specific-note">Playing on the canvas. Use its controls to blink, swipe, subtract and track movers; click a sector here to jump to it.</p>}
     <p role="status" className="specific-note">{status}</p>
-    {transport.ready && transport.showing && <p className="specific-note">Frame {transport.current + 1} of {count}. Equal screen time per sector; time spans are labels, not cadence.</p>}
+    {transport.ready && transport.showing && !transport.consoleOwnsPlayback && <p className="specific-note">Frame {transport.current + 1} of {count}. Equal screen time per sector; time spans are labels, not cadence.</p>}
     {transport.prepareBlocked && <p className="specific-note">{transport.prepareBlocked}</p>}
     {transport.error && <p role="alert">{transport.error}</p>}
     {transport.failed.length > 0 && <ul aria-label="Failed sectors">{transport.failed.map((text) => <li key={text}>{text}</li>)}</ul>}

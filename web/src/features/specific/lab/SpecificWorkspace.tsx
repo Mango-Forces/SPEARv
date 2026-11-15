@@ -3,6 +3,11 @@ import { EdgeSidebar } from "../../shell/edge-sidebar"
 import { ImageViewport } from "../../viewport/ImageViewport"
 import { BoundsCard } from "./BoundsCard"
 import { formatBands, type Bounds } from "../bounds"
+import { formatUtcClock, formatUtcDate } from "../date"
+import { FrameConsole, type ConsoleFrame } from "../FrameConsole"
+import { useSequencePlanes } from "./useSequencePlanes"
+import type { SnippetSort } from "./useObservations"
+import type { View } from "../../../url-state/view"
 import { SectorsEditor } from "./SectorsEditor"
 import { ObservationTable } from "./ObservationTable"
 import { SectorTimeline, type TransportState } from "./SectorTimeline"
@@ -19,7 +24,10 @@ import type { SpectrumPointTarget } from "../../spectrum-panel"
 import { tickDecision } from "./playback"
 import "./lab.css"
 
-type Display = "snippet" | "sector" | "sequence"
+type Display = "snippet" | "sector" | "sequence" | "compare"
+
+/** Most exposures one compare holds; each becomes its own frame. */
+const COMPARE_LIMIT = 8
 
 type QuickState =
   | { phase: "listing"; band: number }
@@ -32,6 +40,8 @@ type QuickState =
  * until `armed`, which only Find sets. */
 export function SpecificWorkspace(props: {
   region: Region
+  /** The page view, for catalog layers and pixel picks on the frame console. */
+  view: View
   active: boolean
   armed: boolean
   /** True while discovery or a quick video build is running, for Find/Stop. */
@@ -57,7 +67,12 @@ export function SpecificWorkspace(props: {
   const [state, dispatch] = useReducer(sectorReducer, props.region, initialSectorState)
   const [boundsRevision, setBoundsRevision] = useState(0)
   const [search, setSearch] = useState("")
-  const [sort, setSort] = useState<"time" | "band">("time")
+  const [sort, setSort] = useState<SnippetSort>("time")
+  const [quality, setQuality] = useState<"any" | "pass">("any")
+  const [picked, setPicked] = useState<string[]>([])
+  const [compareIndex, setCompareIndex] = useState(0)
+  const [comparePlaying, setComparePlaying] = useState(false)
+  const [compareLabels, setCompareLabels] = useState<Map<string, string>>(new Map())
   const [direction, setDirection] = useState<"asc" | "desc">("asc")
   const [offset, setOffset] = useState(0)
   const [retainIssue, setRetainIssue] = useState<{ missing: string[]; message?: string }>()
@@ -80,7 +95,7 @@ export function SpecificWorkspace(props: {
   const quickGroups = useRef<Snippet[][]>([])
   const quickBuilding = useRef(false)
   const quickTrimmed = useRef(false)
-  const observations = useObservations(props.region, props.bounds, queryEnabled, search, sort, direction, offset, boundsRevision, quickActive ? 8 : undefined, quickActive ? 250 : 50)
+  const observations = useObservations(props.region, props.bounds, queryEnabled, search, sort, direction, offset, boundsRevision, quickActive ? 8 : undefined, quickActive ? 250 : 50, quality)
   const preview = useSnippetPreview(props.region, props.active)
   const busy = queryEnabled && (observations.loading || quick?.phase === "listing" || quick?.phase === "building")
   useEffect(() => {
@@ -88,6 +103,7 @@ export function SpecificWorkspace(props: {
   }, [busy, props.onBusy])
   const sectorPreview = useSequence(props.region)
   const playback = useSequence(props.region)
+  const compare = useSequence(props.region)
   const canvas = useRef<HTMLCanvasElement>(null)
   const ownedRefs = JSON.stringify([...state.ownerBySnippet.keys()].map((id) => state.snippets.get(id)!.ref))
   useEffect(() => {
@@ -113,6 +129,11 @@ export function SpecificWorkspace(props: {
   // make released frames valid again (for example create-empty then delete).
   const preparedValid = !!playback.prepared && playback.prepared.key === compositionKey && !discarded
   const stale = !!playback.prepared && !preparedValid
+  // A ready sequence or exposure compare plays on the frame console from
+  // calibrated values; the decoded-PNG window is only for single previews.
+  const consoleSequence = display === "compare" ? compare.prepared : display === "sequence" && preparedValid ? playback.prepared : undefined
+  const consoleActive = !!consoleSequence
+  const planes = useSequencePlanes(consoleSequence?.info)
   const count = state.order.length
   useEffect(() => {
     if (count > 0 && previousSectorCount.current === 0) setTimelineOpen(true)
@@ -135,12 +156,12 @@ export function SpecificWorkspace(props: {
     state.order,
     currentId,
     playback.loadFrame,
-    props.active && display === "sequence" && preparedValid,
+    props.active && display === "sequence" && preparedValid && !consoleActive,
   )
   // The frame actually on screen; it lags `current` only while `current` decodes.
   const shownIndex = frameWindow.shownId ? state.order.indexOf(frameWindow.shownId) : -1
   const shownId = shownIndex >= 0 ? frameWindow.shownId : undefined
-  const currentFailed = preparedValid && !!frameWindow.error
+  const currentFailed = preparedValid && (consoleActive ? planes.get(currentId ?? "")?.state === "failed" : !!frameWindow.error)
   const frameReady = preparedValid && !!frameWindow.canvas && !frameWindow.error
   const validSectorPreview = sectorPreview.prepared?.info.sectors.every((sector) => state.sectors.get(sector.id)?.revision === sector.revision)
   const previewId = sectorPreview.prepared?.info.sectors[0]?.id
@@ -153,7 +174,8 @@ export function SpecificWorkspace(props: {
   )
   // Prepared playback stays reachable while another display is showing; its
   // frame window starts decoding again when the user returns to sequence.
-  const playbackReady = preparedValid && !currentFailed && (display !== "sequence" || !!frameWindow.canvas)
+  const consoleReady = planes.get(currentId ?? "")?.state === "ready"
+  const playbackReady = preparedValid && !currentFailed && (display !== "sequence" || (consoleActive ? consoleReady : !!frameWindow.canvas))
 
   useEffect(() => {
     dispatch({ type: "region", region: props.region })
@@ -166,6 +188,7 @@ export function SpecificWorkspace(props: {
   // A snippet or single-sector preview is not the prepared sequence. Pause
   // rather than leave a hidden scheduler "playing" behind another display.
   useEffect(() => { if (display !== "sequence") setPlaying(false) }, [display])
+  useEffect(() => { if (display !== "compare") setComparePlaying(false) }, [display])
   // Playback scheduler. It is not torn down by frame changes: it reads the current
   // frame and decode state through refs. A frame is due one period after the
   // previous one was actually drawn (lastSwap); an undecoded current or next frame
@@ -178,7 +201,7 @@ export function SpecificWorkspace(props: {
   const windowRef = useRef(frameWindow)
   windowRef.current = frameWindow
   const wake = useRef<(() => void) | undefined>(undefined)
-  const scheduling = playing && preparedValid && display === "sequence" && count >= 2
+  const scheduling = playing && preparedValid && display === "sequence" && count >= 2 && !consoleActive
   useEffect(() => {
     if (!scheduling) return
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -287,17 +310,20 @@ export function SpecificWorkspace(props: {
   const prepareBlocked = count === 0 ? "Create sectors and join snippets first."
     : emptySector ? `${state.sectors.get(emptySector)!.name} is empty; join snippets or delete it before preparing playback.` : undefined
   const decodeFailures = preparedValid
-    ? state.order.flatMap((id) => frameWindow.status(id) === "failed" ? [`${state.sectors.get(id)?.name ?? id}: ${frameWindow.reason(id) ?? "Frame tiles could not be loaded."}`] : [])
+    ? state.order.flatMap((id) => {
+      if (consoleActive) return planes.get(id)?.state === "failed" ? [`${state.sectors.get(id)?.name ?? id}: ${planes.get(id)?.error ?? "Frame values could not be loaded."}`] : []
+      return frameWindow.status(id) === "failed" ? [`${state.sectors.get(id)?.name ?? id}: ${frameWindow.reason(id) ?? "Frame tiles could not be loaded."}`] : []
+    })
     : []
   const buildFailures = playback.progress?.sectors.filter((sector) => sector.state === "failed").map((sector) => `${state.sectors.get(sector.id)?.name ?? sector.id}: ${sector.error}`) ?? []
   const failedFrames = [...new Set([...buildFailures, ...decodeFailures])]
-  const frameStates = buildStates(state, playback.progress, playback.loading, preparedValid, stale, playback.prepared?.info, (id) => preparedValid && frameWindow.status(id) === "failed")
+  const frameStates = buildStates(state, playback.progress, playback.loading, preparedValid, stale, playback.prepared?.info, (id) => preparedValid && (consoleActive ? planes.get(id)?.state === "failed" : frameWindow.status(id) === "failed"))
   const showingSequence = display === "sequence" && !!shown
   const transportState: TransportState = playback.loading ? "building"
     : stale ? "stale"
     : currentFailed ? "failed"
     : playback.error ? "failed"
-    : preparedValid && (display !== "sequence" || !!frameWindow.canvas) ? "ready"
+    : preparedValid && (display !== "sequence" || (consoleActive ? consoleReady : !!frameWindow.canvas)) ? "ready"
     : preparedValid ? "decoding"
     : "idle"
   const stepEnabled = preparedValid && !playback.loading && (transportState === "ready" || transportState === "failed")
@@ -305,7 +331,7 @@ export function SpecificWorkspace(props: {
   const caption = (() => {
     if (display === "snippet" && preview.result) {
       const info = preview.result.info
-      return `Snippet · band ${info.snippet.band} · ${info.snippet.utc} · ${info.snippet.release.toUpperCase()} / D${info.snippet.detector} · ${info.valid_samples} valid samples · ${info.state === "empty" ? "No valid measurements" : "IMAGE − ZODI, strict Spectrum mask, nearest-pixel sampling"} · own scale`
+      return `Exposure · band ${info.snippet.band} · ${humanUtc(info.snippet.utc)} · ${info.snippet.release.toUpperCase()} / D${info.snippet.detector} · ${info.valid_samples} valid samples · ${info.state === "empty" ? "No valid measurements" : "IMAGE − ZODI, strict Spectrum mask, nearest-pixel sampling"} · own scale`
     }
     if (display === "sector" && validSectorPreview && sectorPreview.prepared) {
       const info = sectorPreview.prepared.info
@@ -329,7 +355,43 @@ export function SpecificWorkspace(props: {
     display === "snippet" && preview.error,
     display === "sector" && (sectorPreview.error ?? previewWindow.error),
     display === "sequence" && playback.error,
+    display === "compare" && compare.error,
   ].filter(Boolean)
+  const togglePick = (snippet: Snippet) => setPicked((list) =>
+    list.includes(snippet.id) ? list.filter((id) => id !== snippet.id) : list.length >= COMPARE_LIMIT ? list : [...list, snippet.id])
+  const startCompare = () => {
+    const snippets = picked.flatMap((id) => state.snippets.get(id) ?? [])
+    if (snippets.length < 2) return
+    const ordered = [...snippets].sort((left, right) => left.mjd - right.mjd)
+    const sectors = ordered.map((snippet, at) => ({ id: `exposure-${at + 1}`, revision: 1, snippets: [snippet.ref] }))
+    setCompareLabels(new Map(ordered.map((snippet, at) => [`exposure-${at + 1}`, `${String.fromCharCode(65 + picked.indexOf(snippet.id))} · band ${snippet.band}`])))
+    setCompareIndex(0)
+    setComparePlaying(false)
+    setDisplay("compare")
+    void compare.prepare(JSON.stringify([props.region, sectors.map((sector) => sector.snippets[0])]), sectors)
+  }
+
+  const consoleFrames: ConsoleFrame[] = !consoleSequence ? [] : (display === "compare"
+    ? consoleSequence.info.sectors.map((sector) => sector.id)
+    : state.order).flatMap((id) => {
+    const sector = consoleSequence.info.sectors.find((item) => item.id === id)
+    if (!sector) return []
+    const loaded = planes.get(id)
+    return [{
+      id,
+      label: display === "compare" ? compareLabels.get(id) ?? id : state.sectors.get(id)?.name ?? id,
+      mjd: sector.mjd_start,
+      mjd_end: sector.mjd_end,
+      state: loaded?.state ?? "loading",
+      plane: loaded?.plane,
+      error: loaded?.error,
+      detail: sectorDetail(sector),
+      epoch: true,
+    }]
+  })
+  const consoleBands = consoleSequence ? [...new Set(consoleSequence.info.sectors.flatMap((sector) => sector.bands))].sort((left, right) => left - right) : []
+  const consoleLoaded = consoleFrames.filter((item) => item.state !== "loading").length
+
   const applyBounds = (next: Bounds) => {
     setOffset(0)
     setBoundsRevision((value) => value + 1)
@@ -445,6 +507,11 @@ export function SpecificWorkspace(props: {
       if (validSectorPreview) return "Decoding sector preview…"
       return "Sector preview unavailable."
     }
+    if (display === "compare") {
+      if (compare.loading) return "Building exposure compare…"
+      if (compare.error) return "Exposure compare failed."
+      return "Exposure compare unavailable."
+    }
     if (display === "sequence") {
       if (playback.loading) return "Building sector frames…"
       if (stale) return "Composition changed. Prepare playback again."
@@ -483,18 +550,20 @@ export function SpecificWorkspace(props: {
         <SectorsEditor state={state} bounds={props.bounds} search={search} dispatch={dispatch} buildStates={frameStates}
           onPreview={(snippet) => { setDisplay("snippet"); void preview.preview(snippet) }}
           onPreviewSector={previewSector} />
-        <ObservationTable {...observations} discoveryState={observations.state} state={state} pageSize={observations.sampled ? 250 : 50} search={search} onSearch={(value) => { setSearch(value); setOffset(0) }} sort={sort} direction={direction} onSort={(next) => { setSort(next); setDirection(sort === next && direction === "asc" ? "desc" : "asc"); setOffset(0) }} offset={offset} onPage={setOffset} dispatch={dispatch} onPreview={(snippet) => { setDisplay("snippet"); void preview.preview(snippet) }} />
+        <ObservationTable {...observations} discoveryState={observations.state} state={state} pageSize={observations.sampled ? 250 : 50} search={search} onSearch={(value) => { setSearch(value); setOffset(0) }} sort={sort} direction={direction} onSort={(next) => { setSort(next); setDirection(sort === next && direction === "asc" ? "desc" : "asc"); setOffset(0) }} offset={offset} onPage={setOffset} dispatch={dispatch} onPreview={(snippet) => { setDisplay("snippet"); void preview.preview(snippet) }}
+          quality={quality} onQuality={(next) => { setQuality(next); setOffset(0) }}
+          picked={picked} onTogglePick={togglePick} onCompare={startCompare} onClearPicks={() => setPicked([])} comparing={compare.loading} />
         <SectorTimeline state={state} dispatch={dispatch} frameStates={frameStates} open={timelineOpen} onOpenChange={setTimelineOpen} transport={{
           prepareBlocked, state: transportState, ready: playbackReady, stepEnabled, playing, showing: showingSequence, current: shownIndex >= 0 && display === "sequence" ? shownIndex : current, rate, loop,
           buffering: bufferingIndex,
           failedFrame: currentFailed ? current : undefined,
-          progress: playback.loading && playback.progress ? `Building ${playback.progress.sectors.filter((sector) => sector.state === "ready").length} of ${playback.progress.sectors.length} sectors…` : playback.loading ? "Submitting sectors…" : display === "sequence" && preparedValid && !frameReady && !currentFailed ? "Buffering from downloaded frame tiles…" : undefined,
+          progress: playback.loading && playback.progress ? `Building ${playback.progress.sectors.filter((sector) => sector.state === "ready").length} of ${playback.progress.sectors.length} sectors…` : playback.loading ? "Submitting sectors…" : display === "sequence" && preparedValid && !consoleActive && !frameReady && !currentFailed ? "Buffering from downloaded frame tiles…" : undefined,
           error: playback.error ?? frameWindow.error, failed: failedFrames,
           onPrepare: () => { setTimelineOpen(true); setDiscarded(false); setPlaying(false); setDisplay("sequence"); setFrame(0); void playback.prepare(compositionKey, submitted(state.order)) },
           onPlay: () => { if (currentFailed) return; setTimelineOpen(true); setDisplay("sequence"); if (!playing && !loop && current >= count - 1) setFrame(0); setPlaying(!playing) },
           onStep: (delta) => { if (!count) return; setTimelineOpen(true); setDisplay("sequence"); setPlaying(false); setFrame((current + delta + count) % count) },
           onSeek: (index) => {
-            if (preparedValid) { setTimelineOpen(true); setDisplay("sequence"); setFrame(index); return }
+            if (preparedValid) { setTimelineOpen(true); setDisplay("sequence"); setPlaying(false); setFrame(index); return }
             setPlaying(false)
             const id = state.order[index]
             // An unprepared non-empty clip uses the existing one-sector preview.
@@ -502,10 +571,34 @@ export function SpecificWorkspace(props: {
             if (id && sectorMembers(state, id).length > 0) previewSector(id)
           },
           onRate: setRate, onLoop: setLoop,
+          consoleOwnsPlayback: consoleActive && display === "sequence",
         }} />
         </div>
       </EdgeSidebar>
-      <figure className="specific-canvas" data-decoded-frames={frameWindow.decoded} data-window={frameWindow.allFit ? "all" : "rolling"} data-playing={playing && display === "sequence"}>
+      {consoleActive && consoleSequence ? <section className="stage lab-stage" aria-label="Lab frames">
+        <FrameConsole
+          frames={consoleFrames}
+          index={display === "compare" ? compareIndex : current}
+          onIndex={display === "compare" ? setCompareIndex : setFrame}
+          playing={display === "compare" ? comparePlaying : playing}
+          onPlaying={display === "compare" ? setComparePlaying : setPlaying}
+          noun={display === "compare" ? "exposure" : "sector"}
+          view={props.view}
+          canvasKey={consoleSequence.sequenceId}
+          bandsLabel={`bands ${formatBands(consoleBands)}`}
+          bands={consoleBands}
+          busy={consoleLoaded < consoleFrames.length}
+          status={consoleLoaded < consoleFrames.length ? `loading values ${consoleLoaded + 1} of ${consoleFrames.length}` : `${consoleFrames.filter((item) => item.state === "ready").length} frames`}
+          onCatalogStatus={props.onCatalogStatus}
+          onPick={(pixel, grid) => {
+            const sky = skyAtPixel(pixel.x, pixel.y, grid.width, grid.height, props.region.ra, props.region.dec)
+            props.onPoint?.({ x: pixel.x, y: pixel.y, ra: sky.ra, dec: sky.dec })
+          }}
+          empty={<span className="rendering">Loading calibrated values · {consoleLoaded} of {consoleFrames.length} frames</span>}
+        >
+          {display === "compare" && <p className="release-hint">Each picked exposure is its own frame, on one shared stretch. Different bands are different wavelengths, so brightness differences between them are not necessarily changes in time.</p>}
+        </FrameConsole>
+      </section> : <figure className="specific-canvas" data-decoded-frames={frameWindow.decoded} data-window={frameWindow.allFit ? "all" : "rolling"} data-playing={playing && display === "sequence"}>
         <div className="specific-viewport-area">
           <ImageViewport native={shown ? { w: shown.width, h: shown.height } : undefined} resetKey={viewportResetKey} label="Specific image" hud={shown && display === "sequence" && bufferingIndex !== undefined ? <p className="specific-buffering" aria-hidden="true">Buffering frame {bufferingIndex + 1}…</p> : undefined}>
             {(ctx) => shown ? <div className="specific-frame-stack">
@@ -549,13 +642,23 @@ export function SpecificWorkspace(props: {
           {errors.length > 0 && <div className="specific-canvas-errors">{errors.map((error) => <p key={String(error)} role="alert">{error}</p>)}</div>}
         </div>
         {shown ? <figcaption><span className="specific-caption-main">{caption}</span><span className="specific-caption-note">Hatch = no data.</span>{display && display !== "snippet" ? <details className="specific-mixture"><summary>Display mixture: brightness differences are not necessarily temporal</summary><p>Equal-band grayscale mean of inverse-variance band means; pixels missing any band are no-data. A display mixture, not a single wavelength. Different sectors may use different band sets and are therefore different spectral mixtures. Target coverage is the fraction of complete pixels in a 7-pixel aperture around the field centre. Native release calibration, no cross-release correction.</p></details> : null}</figcaption> : null}
-      </figure>
+      </figure>}
     </div>
   </div>
 }
 
+/** Readable UTC: "5 May 2025 16:49:00". */
+function humanUtc(utc: string) {
+  return `${formatUtcDate(utc)} ${formatUtcClock(utc)}`
+}
+
+/** Console caption detail for one built sector. */
+function sectorDetail(sector: SequenceInfo["sectors"][number]) {
+  return `${sector.releases.map((release) => release.toUpperCase()).join(" / ")} · ${sector.snippets} exposure${sector.snippets === 1 ? "" : "s"} · centre ${Math.round(sector.target_coverage * 100)}% covered`
+}
+
 function frameText(sector: SequenceInfo["sectors"][number]) {
-  const span = sector.utc_start === sector.utc_end ? sector.utc_start : `${sector.utc_start} → ${sector.utc_end}`
+  const span = sector.utc_start === sector.utc_end ? humanUtc(sector.utc_start) : `${humanUtc(sector.utc_start)} to ${humanUtc(sector.utc_end)}`
   const target = sector.target_covered ? "target covered" : "target no data"
   return `bands ${formatBands(sector.bands)} · ${span} · ${sector.releases.map((release) => release.toUpperCase()).join(" / ")} · ${sector.snippets} snippet${sector.snippets === 1 ? "" : "s"} · ${target} ${Math.round(sector.target_coverage * 100)}%`
 }

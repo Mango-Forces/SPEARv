@@ -250,3 +250,86 @@
   color: var(--specific-secondary);
   font-size: 13px;
 }
+
+/* Lab: a wider editor so the snippet table shows quality and picks without
+ * horizontal scrolling, and the shared frame console on the canvas side. */
+.workspace[data-mode="specific"] .specific-workspace .edge-sidebar--editor {
+  --edge-width: 520px;
+}
+
+@media (min-width: 901px) and (max-width: 1279px) {
+  .workspace[data-mode="specific"] .specific-workspace .edge-sidebar--editor { --edge-width: 460px; }
+}
+
+.lab-stage {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.snippet-scroll table { min-width: 33rem; }
+.snippet-scroll th:nth-child(6), .snippet-scroll td:nth-child(6) { width: 6.2rem; }
+.snippet-scroll th:nth-child(7), .snippet-scroll td:nth-child(7) { width: 10.4rem; }
+
+.snippet-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--specific-gap);
+  margin-block: var(--specific-gap);
+}
+
+.snippet-compare {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.quality-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.quality-badge {
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.quality-badge.pass { color: var(--specific-accent); }
+.quality-badge.flagged { color: #ffd166; }
+.quality-badge.unknown { color: var(--specific-muted); border-color: var(--specific-line-strong); }
+
+.quality-psf {
+  color: var(--specific-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.snippet-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 3.2rem;
+  color: var(--specific-secondary);
+  font-size: 12px;
+}
+
+.snippet-pick input { margin: 0; }
+
+.snippet-scroll tr[data-picked] td {
+  background: color-mix(in srgb, var(--specific-accent) 9%, transparent);
+}
+
+.snippet-tools .specific-inline {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.snippet-tools .specific-inline input { margin: 0; }

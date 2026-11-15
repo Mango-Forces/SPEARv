@@ -8,6 +8,7 @@ import {
   paintOnion,
   paintPlane,
   paintSum,
+  paintSwipe,
   resolveStretch,
   sharedStretch,
   tone,
@@ -61,6 +62,17 @@ describe("calibrated display", () => {
     const out = image()
     paintOnion(p, p, stretch, out, TONE_SOFT, 0.5)
     assert.equal(out.data[0], tone(5, stretch, TONE_SOFT))
+  })
+
+  it("swipe shows a left of the divider and b right of it", () => {
+    const a = plane(4, 1, 0)
+    const b = plane(4, 1, 10)
+    const stretch = { low: 0, high: 10, span: 10 }
+    const out = image(4)
+    paintSwipe(a, b, stretch, out, TONE_SOFT, 0.5)
+    assert.equal(out.data[0], 0, "left pixel from a")
+    assert.equal(out.data[3 * 4], 255, "right pixel from b")
+    assert.deepEqual([...out.data.slice(2 * 4, 2 * 4 + 3)], [198, 255, 46], "divider is lime")
   })
 
   it("a difference of equal planes is mid-grey", () => {

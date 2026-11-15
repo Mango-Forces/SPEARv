@@ -479,6 +479,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sequences/{sequence_id}/sectors/{sector_id}/values/{x}/{y}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Raw little-endian `f32` calibrated values of one 256×256 tile, MJy/sr with
+         *     NaN for no data. The browser applies its own shared stretch and comparisons.
+         */
+        get: operations["sequences.values"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sequences/{sequence_id}/sectors/{sector_id}/variance/{x}/{y}": {
         parameters: {
             query?: never;
@@ -2513,6 +2533,8 @@ export interface operations {
                 direction?: string;
                 offset?: number;
                 limit?: number;
+                /** @description `pass` keeps only rows whose header quality raises no flag. */
+                quality?: string;
             };
             header?: never;
             path: {
@@ -2846,6 +2868,46 @@ export interface operations {
                 };
                 content: {
                     "image/png": unknown;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
+    "sequences.values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sequence_id: string;
+                sector_id: string;
+                x: number;
+                y: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
                 };
             };
             404: {

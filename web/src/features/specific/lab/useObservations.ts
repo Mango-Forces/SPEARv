@@ -10,9 +10,11 @@ const EMPTY: Page = { rows: [], matches: 0, pending: 0, failed: 0, sampled: fals
  * `revision` changes on every explicit Apply/Reset so an unchanged bounds value
  * still retries a failed or expired query instead of reusing the broken key.
  * `perVisit` is the quick-video sample; manual browsing leaves it undefined. */
-export function useObservations(region: Region, bounds: Bounds, active: boolean, search: string, sort: "time" | "band", direction: "asc" | "desc", offset: number, revision: number, perVisit?: number, pageSize = 50) {
+export type SnippetSort = "time" | "band" | "psf"
+
+export function useObservations(region: Region, bounds: Bounds, active: boolean, search: string, sort: SnippetSort, direction: "asc" | "desc", offset: number, revision: number, perVisit?: number, pageSize = 50, quality: "any" | "pass" = "any") {
   const key = JSON.stringify([region.ra, region.dec, region.fovL, region.fovH, bounds, revision])
-  const pageKey = JSON.stringify([key, search, sort, direction, offset])
+  const pageKey = JSON.stringify([key, search, sort, direction, offset, quality])
   const [dataset, setDataset] = useState<{ key: string; id: string }>()
   const [page, setPage] = useState<{ key: string; value: Page }>()
   const [error, setError] = useState<string>()
@@ -84,7 +86,7 @@ export function useObservations(region: Region, bounds: Bounds, active: boolean,
     setError(undefined)
     const load = () => {
       if (stopped.current) return
-      client.GET("/api/v1/observations/{dataset_id}", { params: { path: { dataset_id: dataset.id }, query: { search, sort, direction, offset, limit: pageSize } }, signal: ac.signal })
+      client.GET("/api/v1/observations/{dataset_id}", { params: { path: { dataset_id: dataset.id }, query: { search, sort, direction, offset, limit: pageSize, quality } }, signal: ac.signal })
         .then((result) => {
           if (ac.signal.aborted || stopped.current) return
           if (!result.data) throw new Error(result.error?.error ?? `Discovery failed (${result.response.status}).`)
@@ -102,7 +104,7 @@ export function useObservations(region: Region, bounds: Bounds, active: boolean,
     }
     load()
     return () => { ac.abort(); clearTimeout(timer) }
-  }, [dataset, key, pageKey, active, search, sort, direction, offset])
+  }, [dataset, key, pageKey, active, search, sort, direction, offset, quality])
 
   useEffect(() => {
     if (startedAt === undefined || !loading) return

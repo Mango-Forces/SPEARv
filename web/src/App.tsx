@@ -118,6 +118,13 @@ function ValidViewApp({ view }: { view: View }) {
   const [epochBusy, setEpochBusy] = useState<{ run: number; busy: boolean }>()
   const [specificView, setSpecificView] = useState<SpecificView>("blink")
   const [labBusy, setLabBusy] = useState(false)
+  // Blink and Lab run different engine work, so switching retires the armed
+  // run the same way a mode change does; nothing computes until Find.
+  const switchSpecificView = (next: SpecificView) => {
+    if (next === specificView) return
+    setSpecificView(next)
+    setFind(null)
+  }
   const findRun = useRef(0)
   const [point, setPoint] = useState<SpectrumPointTarget | null>(null)
   const [catalogStatus, setCatalogStatus] = useState<Record<CatalogSource, CatalogState | undefined>>({
@@ -556,10 +563,11 @@ function ValidViewApp({ view }: { view: View }) {
         {workspace === "specific" && specificView === "lab" ? (
           <SpecificWorkspace
             region={{ ra: view.ra, dec: view.dec, fovL: view.fovL, fovH: view.fovH }}
+            view={view}
             active
             armed={armed}
             onBusy={setLabBusy}
-            switcher={<SpecificViewSwitch value={specificView} onChange={setSpecificView} />}
+            switcher={<SpecificViewSwitch value={specificView} onChange={switchSpecificView} />}
             releases={releases}
             bounds={bounds}
             onBoundsChange={applyBounds}
@@ -611,7 +619,7 @@ function ValidViewApp({ view }: { view: View }) {
               </>
             ) : workspace === "specific" ? (
               <>
-                <SpecificViewSwitch value={specificView} onChange={setSpecificView} />
+                <SpecificViewSwitch value={specificView} onChange={switchSpecificView} />
                 <details className="leftbar-section" open>
                   <summary>Bands per epoch</summary>
                   <EpochBandsControl bounds={bounds} onApply={applyBounds} />
