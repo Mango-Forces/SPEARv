@@ -1,9 +1,12 @@
 mod mosaic;
 
+use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{RawQuery, State};
 use axum::http::{header, StatusCode};
 use axum::response::Response;
@@ -13,8 +16,8 @@ use spearv_core::math::{
     spawn_math, MathControl, MathError, NativeInput, Product, Values, MaskPolicy, TargetGrid,
 };
 use spearv_core::{
-    cluster_visits, query_pairs, render_grid_size, visit_index, ApiError, Context, Cutout, Error, Extension,
-    Filter, FlagBits, ReleaseId, SourceId, TanGrid, ViewQuery, BANDS, PIXEL_SCALE_DEG,
+    cluster_visits, query_pairs, render_grid_size, visit_index, ApiError, Context, Cutout, Error, ExposureQuality,
+    Extension, Filter, FlagBits, ReleaseId, SourceId, TanGrid, ViewQuery, BANDS, PIXEL_SCALE_DEG,
 };
 use tokio::sync::Semaphore;
 
@@ -29,6 +32,9 @@ const SPHEREX: &str = "spherex";
 pub const MAX_FOV_DEG: f64 = 30.0;
 const RENDER_SECONDS: u64 = 600;
 const READ_CONCURRENCY: usize = 8;
+
+/// Largest `/api/v1/frame` body the shared response cache keeps.
+const FRAME_CACHE_BYTES: usize = 8 << 20;
 
 /// No-data pixels are nearly black, so the usable field is what reads first.
 /// A bright no-data colour turned a partial footprint into the loudest thing
@@ -70,6 +76,8 @@ impl Extension for Composite {
             .routes(routes!(render_png))
             .routes(routes!(color_png))
             .routes(routes!(coverage))
+            .routes(routes!(exposures))
+            .routes(routes!(frame))
             .routes(routes!(releases))
             .routes(routes!(mosaic::start))
             .routes(routes!(mosaic::status))
@@ -260,6 +268,197 @@ async fn coverage(
     }))
 }
 
+#[derive(Serialize, ToSchema)]
+pub struct ExposureList {
+    pub release: String,
+    pub visits: Vec<Visit>,
+    /// Every exposure that overlaps the view, oldest first.
+    pub exposures: Vec<ExposureInfo>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ExposureInfo {
+    /// Stable within a release. `/api/v1/frame` takes it in `exposures`.
+    pub id: String,
+    pub obsid: String,
+    pub detector: u8,
+    pub version: String,
+    pub mjd: f64,
+    /// The visit this exposure falls in, numbered as `/api/v1/coverage` does.
+    pub visit: Option<u16>,
+    /// The detector's wavelength range in µm.
+    pub wl_min_um: f64,
+    pub wl_max_um: f64,
+    /// Header quality and contamination cards, when the index recorded them.
+    pub quality: Option<ExposureQuality>,
+}
+
+/// The exposures behind a view, one row per file, with their header quality
+/// cards. Nothing is read from the bucket.
+#[utoipa::path(
+    get,
+    path = "/api/v1/exposures",
+    params(RenderQuery),
+    responses(
+        (status = 200, body = ExposureList),
+        (status = 400, body = ApiError)
+    )
+)]
+async fn exposures(
+    State(ctx): State<Arc<Context>>,
+    RawQuery(raw): RawQuery,
+) -> Result<Json<ExposureList>, Error> {
+    let view = view_of(&parse_query(raw.as_deref().unwrap_or(""))?)?;
+    let source = source(&ctx)?;
+    let filter = Filter {
+        release: Some(ReleaseId(view.release.clone())),
+        wavelength_um: None,
+    };
+    let (rows, mut quality) =
+        tokio::try_join!(source.coverage(&view.region, &filter), source.quality(&view.region, &filter))?;
+    let spans = cluster_visits(&rows.iter().map(|exposure| exposure.mjd).collect::<Vec<_>>());
+    let mut exposures: Vec<ExposureInfo> = rows
+        .iter()
+        .map(|exposure| ExposureInfo {
+            id: exposure.id.0.clone(),
+            obsid: exposure.obsid.clone(),
+            detector: exposure.detector,
+            version: exposure.version.clone(),
+            mjd: exposure.mjd,
+            visit: visit_index(exposure.mjd, &spans),
+            wl_min_um: exposure.em_min_um,
+            wl_max_um: exposure.em_max_um,
+            quality: quality.remove(&exposure.id),
+        })
+        .collect();
+    exposures.sort_by(|a, b| a.mjd.partial_cmp(&b.mjd).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(Json(ExposureList {
+        release: view.release,
+        visits: cluster_visits_for(&rows),
+        exposures,
+    }))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct FrameRequest {
+    pub ra: f64,
+    pub dec: f64,
+    pub fov_l: f64,
+    pub fov_h: f64,
+    pub dr: Option<String>,
+    /// Drop flagged pixels. Omitted means true.
+    pub mask: Option<bool>,
+    /// 0-based bands to stack, 0..101. Empty means all 102.
+    #[serde(default)]
+    pub bands: Vec<u16>,
+    /// Keep only this visit of the field.
+    pub visit: Option<u16>,
+    /// Keep only these exposure ids from `/api/v1/exposures`. When present,
+    /// `visit` is ignored.
+    #[serde(default)]
+    pub exposures: Vec<String>,
+}
+
+/// One stacked frame as numbers, not a picture: the same noise-weighted mean
+/// `render.png` draws, limited to one visit or a chosen set of exposures, in
+/// the files' surface-brightness unit. A client that holds several frames can
+/// put them on one scale and subtract or add them.
+#[utoipa::path(
+    post,
+    path = "/api/v1/frame",
+    request_body = FrameRequest,
+    responses(
+        (status = 200, description = "Little-endian f32 values, row-major from the top row; NaN is no data. `x-grid-width` and `x-grid-height` give the shape.", content_type = "application/octet-stream"),
+        (status = 400, description = "The request is invalid", body = ApiError),
+        (status = 404, description = "No selected exposure covers this view", body = ApiError),
+        (status = 502, description = "The S3 read failed", body = ApiError),
+        (status = 504, description = "The render exceeded its time limit", body = ApiError)
+    )
+)]
+async fn frame(
+    State(ctx): State<Arc<Context>>,
+    body: Result<Json<FrameRequest>, JsonRejection>,
+) -> Result<Response, Error> {
+    let Json(request) = body.map_err(|rejection| Error::Message(rejection.body_text()))?;
+    let mut bands = request.bands.clone();
+    bands.sort_unstable();
+    bands.dedup();
+    if bands.last().is_some_and(|band| *band >= 102) {
+        return Err(Error::Message("bands must be 0..101".into()));
+    }
+    if bands.is_empty() {
+        bands = (0..102).collect();
+    }
+    let only: Option<HashSet<String>> =
+        (!request.exposures.is_empty()).then(|| request.exposures.iter().cloned().collect());
+    // One pin per run of consecutive bands; the visit rides on the first.
+    let mut pins = Vec::new();
+    let mut start = 0;
+    for end in 1..=bands.len() {
+        if end < bands.len() && bands[end] == bands[end - 1] + 1 {
+            continue;
+        }
+        let width = (end - start) as u16;
+        let center = bands[start] + (width - 1) / 2;
+        match (pins.is_empty() && only.is_none(), request.visit) {
+            (true, Some(visit)) => pins.push(format!("{center}:{width}:v{visit}:")),
+            _ => pins.push(format!("{center}:{width}")),
+        }
+        start = end;
+    }
+    let view = ViewQuery {
+        ra: request.ra,
+        dec: request.dec,
+        fov_l: request.fov_l,
+        fov_h: request.fov_h,
+        mode: Some("range".into()),
+        dr: request.dr.clone(),
+        pins,
+        mask: Some(if request.mask.unwrap_or(true) { "on" } else { "off" }.into()),
+    }
+    .parse(MAX_FOV_DEG)?;
+    let grid = (render_grid_size(view.region.fov_l_deg)?, render_grid_size(view.region.fov_h_deg)?);
+    let mut chosen: Vec<&String> = request.exposures.iter().collect();
+    chosen.sort_unstable();
+    chosen.dedup();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    chosen.hash(&mut hasher);
+    let key = format!("frame:{}:{:016x}", view.cache_key(), hasher.finish());
+    if let Some(bytes) = ctx.cache.get(&key) {
+        return Ok(frame_response(bytes, grid, true, 0));
+    }
+    let reads = read_band(&ctx, &view, only.as_ref()).await?;
+    let used = reads.used;
+    let left = Duration::from_secs(RENDER_SECONDS).saturating_sub(Duration::from_millis(reads.elapsed_ms as u64));
+    let stacked = tokio::time::timeout(left, stack_of(&ctx, reads.cutouts, &view))
+        .await
+        .map_err(|_| Error::Deadline { seconds: RENDER_SECONDS })??;
+    let width = stacked.width as usize;
+    let mut bytes = Vec::with_capacity(stacked.value.len() * 4);
+    // The stack is bottom row first; the response is top row first, as a PNG is.
+    for row in stacked.value.chunks_exact(width).rev() {
+        for value in row {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    if bytes.len() <= FRAME_CACHE_BYTES {
+        ctx.cache.insert(key, bytes.clone());
+    }
+    Ok(frame_response(bytes, grid, false, used))
+}
+
+fn frame_response(bytes: Vec<u8>, grid: (u32, u32), hit: bool, used: u32) -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header("x-cache", if hit { "HIT" } else { "MISS" })
+        .header("x-exposures", used.to_string())
+        .header("x-grid-width", grid.0.to_string())
+        .header("x-grid-height", grid.1.to_string())
+        .body(axum::body::Body::from(bytes))
+        .expect("frame response")
+}
+
 /// Noise-weighted mean on a north-up TAN grid.
 ///
 /// Every exposure the index says overlaps the view is read, ZODI is subtracted, flagged pixels are dropped, and the rest are
@@ -336,7 +535,7 @@ struct BandReads {
 }
 
 async fn band_png(ctx: &Arc<Context>, view: &spearv_core::View) -> Result<BandPng, Error> {
-    let reads = read_band(ctx, view).await?;
+    let reads = read_band(ctx, view, None).await?;
     let left = Duration::from_secs(RENDER_SECONDS).saturating_sub(Duration::from_millis(reads.elapsed_ms as u64));
     let view = view.clone();
     let ctx = Arc::clone(ctx);
@@ -359,7 +558,13 @@ async fn band_png(ctx: &Arc<Context>, view: &spearv_core::View) -> Result<BandPn
     })
 }
 
-async fn read_band(ctx: &Arc<Context>, view: &spearv_core::View) -> Result<BandReads, Error> {
+/// `only` narrows the read to those exposure ids; `None` keeps the view's own
+/// selection, including a visit on a pin.
+async fn read_band(
+    ctx: &Arc<Context>,
+    view: &spearv_core::View,
+    only: Option<&HashSet<String>>,
+) -> Result<BandReads, Error> {
     let source = source(ctx)?;
     let bands = view.selected_bands();
     let (wl_min, wl_max) = band_span(&bands);
@@ -389,7 +594,9 @@ async fn read_band(ctx: &Arc<Context>, view: &spearv_core::View) -> Result<BandR
         .await?;
     // A visit on a pin picks one epoch. Delta filters its own exposures; this
     // is for slider and range, so a shared link can show either visit.
-    if matches!(view.mode, spearv_core::Mode::Slider | spearv_core::Mode::Range) {
+    if let Some(only) = only {
+        selected.retain(|exposure| only.contains(&exposure.id.0));
+    } else if matches!(view.mode, spearv_core::Mode::Slider | spearv_core::Mode::Range) {
         if let Some(visit) = view.pins.iter().find_map(|pin| pin.visit) {
             let spans = cluster_visits(&all.iter().map(|exposure| exposure.mjd).collect::<Vec<_>>());
             selected.retain(|exposure| visit_index(exposure.mjd, &spans) == Some(visit));
@@ -716,7 +923,7 @@ async fn color_png(
     let mut elapsed = 0;
     for band in bands.channels() {
         let view = color_view(&base, band);
-        let read = read_band(&ctx, &view).await?;
+        let read = read_band(&ctx, &view, None).await?;
         elapsed += read.elapsed_ms;
         views.push(view);
         reads.push(read);

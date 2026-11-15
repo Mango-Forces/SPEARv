@@ -88,6 +88,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/exposures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The exposures behind a view, one row per file, with their header quality
+         *     cards. Nothing is read from the bucket.
+         */
+        get: operations["exposures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/frame": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * One stacked frame as numbers, not a picture: the same noise-weighted mean
+         *     `render.png` draws, limited to one visit or a chosen set of exposures, in
+         *     the files' surface-brightness unit. A client that holds several frames can
+         *     put them on one scale and subtract or add them.
+         */
+        post: operations["frame"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mosaic": {
         parameters: {
             query?: never;
@@ -100,6 +142,26 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mosaic/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Stop one mosaic. The page uses this for Stop so the engine releases reads
+         *     immediately instead of waiting for abandon.
+         */
+        delete: operations["cancel"];
         options?: never;
         head?: never;
         patch?: never;
@@ -503,6 +565,96 @@ export interface components {
             /** Format: int32 */
             width: number;
         };
+        ExposureInfo: {
+            /** Format: int32 */
+            detector: number;
+            /** @description Stable within a release. `/api/v1/frame` takes it in `exposures`. */
+            id: string;
+            /** Format: double */
+            mjd: number;
+            obsid: string;
+            quality?: null | components["schemas"]["ExposureQuality"];
+            version: string;
+            /**
+             * Format: int32
+             * @description The visit this exposure falls in, numbered as `/api/v1/coverage` does.
+             */
+            visit?: number | null;
+            /** Format: double */
+            wl_max_um: number;
+            /**
+             * Format: double
+             * @description The detector's wavelength range in µm.
+             */
+            wl_min_um: number;
+        };
+        ExposureList: {
+            /** @description Every exposure that overlaps the view, oldest first. */
+            exposures: components["schemas"]["ExposureInfo"][];
+            release: string;
+            visits: components["schemas"]["Visit"][];
+        };
+        /**
+         * @description Header quality and contamination cards of one exposure. `None` means the
+         *     release's headers do not carry that card; it never means clean.
+         */
+        ExposureQuality: {
+            /** @description `HE_AIRGLOW_CONT`. */
+            airglow?: boolean | null;
+            /** @description `AURORA_CONT`. */
+            aurora?: boolean | null;
+            /** @description `L1DQAFLG`, e.g. `Pass`. */
+            dqa_l1?: string | null;
+            /** @description `L2DQAFLG`, e.g. `Pass`. */
+            dqa_l2?: string | null;
+            /**
+             * Format: int64
+             * @description `FINAST`; 0 is a good fine-astrometric solution.
+             */
+            finast?: number | null;
+            /**
+             * Format: int64
+             * @description Detected satellite streaks.
+             */
+            n_streaks?: number | null;
+            /**
+             * Format: double
+             * @description `PSF_FWHM`, arcseconds.
+             */
+            psf_fwhm?: number | null;
+            /** @description `SHUTTLE_GLOW_CONT`. */
+            shuttle_glow?: boolean | null;
+            /**
+             * Format: double
+             * @description Percent of pixels flagged SOURCE.
+             */
+            src_frac?: number | null;
+        };
+        FrameRequest: {
+            /** @description 0-based bands to stack, 0..101. Empty means all 102. */
+            bands?: number[];
+            /** Format: double */
+            dec: number;
+            dr?: string | null;
+            /**
+             * @description Keep only these exposure ids from `/api/v1/exposures`. When present,
+             *     `visit` is ignored.
+             */
+            exposures?: string[];
+            /** Format: double */
+            fov_h: number;
+            /** Format: double */
+            fov_l: number;
+            /** @description Drop flagged pixels. Omitted means true. */
+            mask?: boolean | null;
+            /** Format: double */
+            ra: number;
+            /**
+             * Format: int32
+             * @description Keep only this visit of the field.
+             */
+            visit?: number | null;
+        };
         Layer: {
             black_white: components["schemas"]["BlackWhite"];
             enabled: boolean;
@@ -731,7 +883,7 @@ export interface components {
             newest_period?: string | null;
         };
         ReleaseList: {
-            /** @description The release used when `dr` is omitted. QR2 is not mixed with QR3. */
+            /** @description The release used when `dr` is omitted. Releases are never mixed. */
             default_release: string;
             releases: components["schemas"]["ReleaseInfo"][];
         };
@@ -1091,6 +1243,126 @@ export interface operations {
             };
         };
     };
+    exposures: {
+        parameters: {
+            query: {
+                ra: number;
+                dec: number;
+                fov_l: number;
+                fov_h: number;
+                mode?: string;
+                dr?: string;
+                mask?: string;
+                pin?: string[];
+                /**
+                 * @description The red channel's centre band, 0..101. `/api/v1/color.png` and the
+                 *     mosaic's `color=1` use it; omitted keeps 90.
+                 */
+                color_r?: number;
+                /**
+                 * @description The red channel's width in bands, 1..102, centred on `color_r`. Omitted
+                 *     keeps 5.
+                 */
+                color_r_width?: number;
+                /** @description The green channel's centre band, 0..101. Omitted keeps 40. */
+                color_g?: number;
+                /**
+                 * @description The green channel's width in bands, 1..102, centred on `color_g`.
+                 *     Omitted keeps 5.
+                 */
+                color_g_width?: number;
+                /** @description The blue channel's centre band, 0..101. Omitted keeps 5. */
+                color_b?: number;
+                /**
+                 * @description The blue channel's width in bands, 1..102, centred on `color_b`.
+                 *     Omitted keeps 5.
+                 */
+                color_b_width?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExposureList"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    frame: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FrameRequest"];
+            };
+        };
+        responses: {
+            /** @description Little-endian f32 values, row-major from the top row; NaN is no data. `x-grid-width` and `x-grid-height` give the shape. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description The request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description No selected exposure covers this view */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The S3 read failed */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The render exceeded its time limit */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     start: {
         parameters: {
             query: {
@@ -1157,6 +1429,27 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApiError"];
                 };
+            };
+        };
+    };
+    cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mosaic id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancelled, or already gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

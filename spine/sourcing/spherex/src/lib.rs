@@ -243,7 +243,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use reqwest::Client;
 use spearv_core::{
-    Cutout, Error, Exposure, ExposureGeometry, ExposureId, Filter, FlagBits, ImageSource,
+    Cutout, Error, Exposure, ExposureGeometry, ExposureId, ExposureQuality, Filter, FlagBits, ImageSource,
     PixelWindow, Plane, Release, ReleaseId, Result, SkyRegion, SourceId, WavelengthMap, Wcs,
 };
 use spearv_fits::{
@@ -1231,6 +1231,22 @@ fn fits_error(error: spearv_fits::Error) -> Error {
     }
 }
 
+fn exposure_id(obsid: &str, detector: u8, version: &str) -> ExposureId {
+    ExposureId(format!("{obsid}D{detector}:{version}"))
+}
+
+/// The index query behind `coverage` and `quality`, so both list the same rows.
+fn coverage_query(region: &SkyRegion, filter: &Filter) -> CoverageQuery {
+    let (release, survey) = release_and_survey(filter.release.as_ref().map(|id| id.0.as_str()).unwrap_or("qr3"));
+    CoverageQuery {
+        release: Some(release),
+        survey,
+        wl_min: filter.wavelength_um.map(|wl| wl.0),
+        wl_max: filter.wavelength_um.map(|wl| wl.1),
+        ..CoverageQuery::view(region.ra.rem_euclid(360.0), region.dec, region.envelope_deg())
+    }
+}
+
 #[async_trait]
 impl ImageSource for SpherexSource {
     fn id(&self) -> SourceId {
@@ -1255,31 +1271,13 @@ impl ImageSource for SpherexSource {
 
     async fn coverage(&self, region: &SkyRegion, filter: &Filter) -> Result<Vec<Exposure>> {
         let index = self.index()?;
-        let (release, survey) = release_and_survey(
-            filter
-                .release
-                .as_ref()
-                .map(|id| id.0.as_str())
-                .unwrap_or("qr3"),
-        );
-        let query = CoverageQuery {
-            release: Some(release),
-            survey,
-            wl_min: filter.wavelength_um.map(|wl| wl.0),
-            wl_max: filter.wavelength_um.map(|wl| wl.1),
-            ..CoverageQuery::view(
-                region.ra.rem_euclid(360.0),
-                region.dec,
-                region.envelope_deg(),
-            )
-        };
         Ok(index
-            .coverage(&query)
+            .coverage(&coverage_query(region, filter))
             .await?
             .exposures
             .into_iter()
             .map(|row| Exposure {
-                id: ExposureId(format!("{}D{}:{}", row.obsid, row.detector, row.version)),
+                id: exposure_id(&row.obsid, row.detector, &row.version),
                 source: SourceId::new(ID),
                 detector: row.detector,
                 mjd: row.mjd_avg,
@@ -1291,6 +1289,32 @@ impl ImageSource for SpherexSource {
                 size: row.size.and_then(|size| u64::try_from(size).ok()),
                 em_min_um: row.em_min_um,
                 em_max_um: row.em_max_um,
+            })
+            .collect())
+    }
+
+    async fn quality(&self, region: &SkyRegion, filter: &Filter) -> Result<HashMap<ExposureId, ExposureQuality>> {
+        let index = self.index()?;
+        Ok(index
+            .coverage(&coverage_query(region, filter))
+            .await?
+            .exposures
+            .into_iter()
+            .map(|row| {
+                (
+                    exposure_id(&row.obsid, row.detector, &row.version),
+                    ExposureQuality {
+                        dqa_l1: row.quality.dqa_l1,
+                        dqa_l2: row.quality.dqa_l2,
+                        psf_fwhm: row.quality.psf_fwhm,
+                        finast: row.quality.finast,
+                        aurora: row.quality.aurora,
+                        airglow: row.quality.airglow,
+                        shuttle_glow: row.quality.shuttle_glow,
+                        n_streaks: row.quality.n_streaks,
+                        src_frac: row.quality.src_frac,
+                    },
+                )
             })
             .collect())
     }

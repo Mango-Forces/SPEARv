@@ -117,6 +117,30 @@ pub struct Exposure {
     pub em_max_um: f64,
 }
 
+/// Header quality and contamination cards of one exposure. `None` means the
+/// release's headers do not carry that card; it never means clean.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct ExposureQuality {
+    /// `L1DQAFLG`, e.g. `Pass`.
+    pub dqa_l1: Option<String>,
+    /// `L2DQAFLG`, e.g. `Pass`.
+    pub dqa_l2: Option<String>,
+    /// `PSF_FWHM`, arcseconds.
+    pub psf_fwhm: Option<f64>,
+    /// `FINAST`; 0 is a good fine-astrometric solution.
+    pub finast: Option<i64>,
+    /// `AURORA_CONT`.
+    pub aurora: Option<bool>,
+    /// `HE_AIRGLOW_CONT`.
+    pub airglow: Option<bool>,
+    /// `SHUTTLE_GLOW_CONT`.
+    pub shuttle_glow: Option<bool>,
+    /// Detected satellite streaks.
+    pub n_streaks: Option<i64>,
+    /// Percent of pixels flagged SOURCE.
+    pub src_frac: Option<f64>,
+}
+
 /// Row-major pixels. Index 0 is the lower-left corner in FITS order.
 #[derive(Clone, Debug)]
 pub struct Plane<T> {
@@ -175,6 +199,11 @@ pub trait ImageSource: Send + Sync {
     fn id(&self) -> SourceId;
     async fn releases(&self) -> Result<Vec<Release>>;
     async fn coverage(&self, region: &SkyRegion, filter: &Filter) -> Result<Vec<Exposure>>;
+    /// Quality cards of the exposures `coverage` returns for the same query,
+    /// keyed by exposure id. A source that records none returns an empty map.
+    async fn quality(&self, _region: &SkyRegion, _filter: &Filter) -> Result<HashMap<ExposureId, ExposureQuality>> {
+        Ok(HashMap::new())
+    }
     async fn cutout(&self, exposure: &Exposure, region: &SkyRegion) -> Result<Cutout>;
     /// Reads are conditioned on [`Exposure::etag`] when it is set.
     async fn geometry(&self, exposure: &Exposure) -> Result<ExposureGeometry>;
