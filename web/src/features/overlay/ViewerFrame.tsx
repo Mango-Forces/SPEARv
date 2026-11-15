@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from "react"
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react"
 import type { View } from "../../url-state/view"
 import { CATALOG_SOURCES, type CatalogRow, type CatalogSource } from "./catalog"
 import { useCatalog, type CatalogState } from "./useCatalog"
@@ -40,6 +40,8 @@ export function ViewerFrame(props: {
   /** Single-source catalog status for the shell layers drawer. */
   onCatalogStatus?: (report: CatalogStatusReport) => void
   onPick: (pick: { x: number; y: number }) => void
+  /** Extra marker layer on the same native-pixel viewBox as the catalogs. */
+  overlay?: (frame: { native: { w: number; h: number }; scale: number }) => ReactNode
 }) {
   const { mosaic, view, epochMjd, onPick, onCatalogStatus } = props
   const [native, setNative] = useState<{ w: number; h: number }>()
@@ -158,6 +160,7 @@ export function ViewerFrame(props: {
                     })
                   : null}
                 {native ? <CandidatesLayer state={candidates} native={native} scale={ctx.effectiveScale} onPick={onPick} /> : null}
+                {native && props.overlay ? props.overlay({ native, scale: ctx.effectiveScale }) : null}
               </div>
             )}
           </ImageViewport>

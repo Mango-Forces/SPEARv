@@ -6,7 +6,6 @@ import type { SpectrumPointTarget } from "../spectrum-panel"
 import type { View } from "../../url-state/view"
 import { formatBands, type Bounds } from "./bounds"
 import {
-  brightCentroid,
   centreCoverage,
   paintDifference,
   paintMotionGlow,
@@ -21,6 +20,8 @@ import {
 } from "./calibrate"
 import { formatMjdDate, mjdToMs, qualityFlags, stepReady, type ExposureRow } from "./frames"
 import { useCalibratedFrames, type CalibratedFrame } from "./useCalibratedFrames"
+import { heading, MIN_EPOCHS, searchMotion, type MotionSearch } from "./motion"
+import { ARROW_YEARS, describe, MotionLayer } from "./MotionLayer"
 import "./specific.css"
 
 type Show = "epoch" | "onion" | "previous" | "first" | "glow" | "sum"
@@ -56,7 +57,7 @@ export function EpochPlayer(props: {
   const epochs = useCalibratedFrames(view, bounds, armed, run + customRun * 1000, custom)
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(() => !window.matchMedia("(prefers-reduced-motion: reduce)").matches)
-    const [show, setShow] = useState<Show>("epoch")
+  const [show, setShow] = useState<Show>("epoch")
   const [loop, setLoop] = useState(true)
   const [tableOpen, setTableOpen] = useState(false)
   // WiseView-style display: linear + invert is the classic motion blink.
@@ -70,6 +71,8 @@ export function EpochPlayer(props: {
   const [diffGain, setDiffGain] = useState(2)
   /** Optional locked pair for compare modes; defaults to previous/first logic. */
   const [lockB, setLockB] = useState<number | null>(null)
+  /** Fit a track through every epoch and mark what moves. */
+  const [trackMovers, setTrackMovers] = useState(true)
 
   const ready = epochs.frames.flatMap((frame, at) => (frame.state === "ready" && frame.plane ? [at] : []))
   const readyKey = ready.join(",")
@@ -178,20 +181,20 @@ export function EpochPlayer(props: {
     context.putImageData(out, 0, 0)
   }, [mosaic, current?.plane, reference?.plane, show, readyKey, stretch, display, diffGain])
 
-  const motionNote = useMemo(() => {
-    if (!current?.plane || !reference?.plane || shown === undefined || referenceAt === undefined) return undefined
-    if (show !== "glow" && show !== "previous" && show !== "first" && show !== "onion") return undefined
-    const a = brightCentroid(current.plane)
-    const b = brightCentroid(reference.plane)
-    if (!a || !b) return undefined
-    const dx = a.x - b.x
-    const dy = a.y - b.y
-    const pix = Math.hypot(dx, dy)
-    // SPHEREx plate scale is 6.15"/px — same constant the viewport uses.
-    const arcsec = pix * 6.15
-    if (pix < 0.15) return "Peak source steady (<0.15 px) between these frames"
-    return `Peak shift ${pix.toFixed(2)} px · ${arcsec.toFixed(1)}″ between compared frames`
-  }, [current?.plane, reference?.plane, shown, referenceAt, show])
+  // Survey-style motion search: detect per epoch, match, fit position
+  // against time. Visit frames only; custom frames reuse the same exposures.
+  const motion = useMemo<MotionSearch | undefined>(() => {
+    if (!trackMovers) return undefined
+    const visits = ready.flatMap((at) => {
+      const frame = epochs.frames[at]!
+      return frame.kind === "visit" && frame.plane ? [frame] : []
+    })
+    if (visits.length === 0) return undefined
+    const start = visits[0]!.mjd
+    return searchMotion(
+      visits.map((frame) => ({ years: ((frame.mjd + frame.mjd_end) / 2 - start) / 365.25, plane: frame.plane! })),
+    )
+  }, [trackMovers, readyKey, epochs.frames])
 
   const pick = (pixel: { x: number; y: number }) => {
     if (!mosaic || !clicksWork(mosaic)) return
@@ -248,6 +251,11 @@ export function EpochPlayer(props: {
             epochMjd={epochMjd}
             onCatalogStatus={props.onCatalogStatus}
             onPick={pick}
+            overlay={(frame) =>
+              motion && !busy ? (
+                <MotionLayer movers={motion.movers} native={frame.native} scale={frame.scale} onPick={pick} />
+              ) : null
+            }
           />
         ) : (
           <div className="empty">
@@ -345,7 +353,14 @@ export function EpochPlayer(props: {
               <input type="checkbox" checked={loop} onChange={(event) => setLoop(event.target.checked)} />
               Loop
             </label>
-            <label className="epoch-option epoch-loop" title="Linear stretch, inverted greyscale — the classic WiseView motion blink">
+            <label
+              className="epoch-option epoch-loop"
+              title="Detect sources in every epoch, match them, and fit position against time"
+            >
+              <input type="checkbox" checked={trackMovers} onChange={(event) => setTrackMovers(event.target.checked)} />
+              Track movers
+            </label>
+            <label className="epoch-option epoch-loop" title="Linear stretch, inverted greyscale: the classic WiseView motion blink">
               <input
                 type="checkbox"
                 checked={invert && linear}
@@ -435,7 +450,7 @@ export function EpochPlayer(props: {
           ) : null}
           {current && show === "onion" ? (
             <span className="delta-legend">
-              50% this epoch + 50% {reference?.label ?? "reference"} — movers double; fixed sky sits still
+              50% this epoch + 50% {reference?.label ?? "reference"}: movers double, fixed sky sits still
             </span>
           ) : null}
           {current && show === "glow" ? (
@@ -443,7 +458,7 @@ export function EpochPlayer(props: {
               lime where |this − {reference?.label ?? "reference"}| is large · fixed sky stays grey
             </span>
           ) : null}
-          {motionNote ? <span className="epoch-motion">{motionNote}</span> : null}
+          {motion && !busy ? <MotionSummary motion={motion} bands={bounds.bands} onPick={pick} /> : null}
           <span>bands {formatBands(bounds.bands)}</span>
           {stretch ? (
             <span title="Shared display stretch across every frame">
@@ -535,10 +550,10 @@ function ExposureRowView(props: { row: ExposureRow; checked: boolean; onToggle: 
       <td>
         <time dateTime={new Date(mjdToMs(props.row.mjd)).toISOString()}>{formatMjdDate(props.row.mjd)}</time>
       </td>
-      <td>{props.row.visit ?? "—"}</td>
+      <td>{props.row.visit ?? "-"}</td>
       <td>D{props.row.detector}</td>
       <td title={flags.join(", ") || (pass ? "Pass" : "Unknown")}>
-        {flags.length ? flags.join(", ") : pass ? "Pass" : "—"}
+        {flags.length ? flags.join(", ") : pass ? "Pass" : "-"}
         {props.row.quality?.psf_fwhm != null ? ` · ${props.row.quality.psf_fwhm.toFixed(1)}″` : ""}
       </td>
       <td title={props.row.version}>{props.row.obsid}</td>
@@ -566,4 +581,45 @@ function chipTitle(frame: CalibratedFrame): string {
   if (frame.state === "failed") return `${span} · ${frame.error ?? "failed"}`
   if (frame.state === "ready") return span
   return `${span} · rendering`
+}
+
+/** What the motion search found, in words, with each mover clickable for its spectrum. */
+function MotionSummary(props: { motion: MotionSearch; bands: readonly number[]; onPick: (pick: { x: number; y: number }) => void }) {
+  const { motion } = props
+  if (motion.epochs < MIN_EPOCHS) {
+    return (
+      <span className="epoch-motion quiet">
+        Motion fit needs {MIN_EPOCHS} epochs; this run has {motion.epochs}.
+      </span>
+    )
+  }
+  const floor = `noise floor ${motion.floor.toFixed(1)}″/yr over ${motion.tracked} tracked sources`
+  if (motion.movers.length === 0) {
+    return (
+      <span className="epoch-motion quiet">
+        No mover above 3σ ({floor}).
+        {!props.bands.some((band) => band > 68) ? " Cold brown dwarfs barely show below 3 µm; try D5 or D6." : ""}
+      </span>
+    )
+  }
+  return (
+    <span className="epoch-motion">
+      {motion.movers.slice(0, 4).map((mover, at) => (
+        <button
+          key={at}
+          type="button"
+          className={`mover-chip ${mover.tier}`}
+          title={describe(mover)}
+          onClick={() => props.onPick({ x: Math.floor(mover.x), y: Math.floor(mover.y) })}
+        >
+          {mover.tier === "candidate" ? "Mover" : "Possible"} {mover.pm.toFixed(1)} ± {mover.error.toFixed(1)}″/yr{" "}
+          {heading(mover.pmRa, mover.pmDec)} · {mover.significance.toFixed(1)}σ
+        </button>
+      ))}
+      {motion.movers.length > 4 ? <span>+{motion.movers.length - 4} more</span> : null}
+      <span className="quiet">
+        {floor} · arrows show {ARROW_YEARS} years
+      </span>
+    </span>
+  )
 }

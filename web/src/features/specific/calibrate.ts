@@ -239,37 +239,3 @@ export function centreCoverage(plane: FramePlane, radius = 3): number {
   }
   return total === 0 ? 0 : ok / total
 }
-
-/**
- * Brightest finite pixel centroid (flux-weighted in a box around the max).
- * Used to measure whether a known mover actually shifted between epochs.
- */
-export function brightCentroid(plane: FramePlane, box = 5): { x: number; y: number; peak: number } | undefined {
-  let peak = -Infinity
-  let px = 0
-  let py = 0
-  for (let y = 0; y < plane.height; y++) {
-    for (let x = 0; x < plane.width; x++) {
-      const value = plane.values[y * plane.width + x]!
-      if (!Number.isFinite(value) || value <= peak) continue
-      peak = value
-      px = x
-      py = y
-    }
-  }
-  if (!Number.isFinite(peak) || peak === -Infinity) return undefined
-  let wx = 0
-  let wy = 0
-  let w = 0
-  for (let y = Math.max(0, py - box); y <= Math.min(plane.height - 1, py + box); y++) {
-    for (let x = Math.max(0, px - box); x <= Math.min(plane.width - 1, px + box); x++) {
-      const value = plane.values[y * plane.width + x]!
-      if (!Number.isFinite(value) || value < peak * 0.3) continue
-      wx += x * value
-      wy += y * value
-      w += value
-    }
-  }
-  if (w <= 0) return { x: px, y: py, peak }
-  return { x: wx / w, y: wy / w, peak }
-}

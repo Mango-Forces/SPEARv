@@ -2,7 +2,6 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import {
-  brightCentroid,
   centreCoverage,
   paintDifference,
   paintMotionGlow,
@@ -98,17 +97,5 @@ describe("calibrated display", () => {
     p.values[3 * 7 + 3] = 1
     assert.ok(centreCoverage(p) > 0)
     assert.ok(centreCoverage(p) < 1)
-  })
-
-  it("bright centroid tracks a shifted peak", () => {
-    const a = plane(11, 11, 0)
-    a.values[5 * 11 + 5] = 10
-    const b = plane(11, 11, 0)
-    b.values[5 * 11 + 7] = 10
-    const ca = brightCentroid(a)
-    const cb = brightCentroid(b)
-    assert.ok(ca && cb)
-    assert.ok(Math.abs(ca.x - 5) < 0.01)
-    assert.ok(Math.abs(cb.x - 7) < 0.01)
   })
 })
