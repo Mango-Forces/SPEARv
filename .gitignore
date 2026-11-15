@@ -20,3 +20,8 @@ web/openapi.json
 
 spine/target/
 data/
+
+# Cloudflare tunnel secrets (host-only)
+**/.cloudflared/
+**/cert.pem
+**/credentials.json

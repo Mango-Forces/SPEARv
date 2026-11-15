@@ -1,0 +1,14 @@
+# Copy to ~/.cloudflared/config.yml on the host (never commit the real file).
+# Create the tunnel and credentials with:
+#   cloudflared tunnel login
+#   cloudflared tunnel create spearv
+#   cloudflared tunnel route dns spearv mango.forces.quest
+# Credentials live only as ~/.cloudflared/<tunnel-id>.json
+
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: /home/ubuntu/.cloudflared/REPLACE_WITH_TUNNEL_ID.json
+
+ingress:
+  - hostname: mango.forces.quest
+    service: http://127.0.0.1:8090
+  - service: http_status:404
