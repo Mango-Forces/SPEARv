@@ -309,3 +309,27 @@ fieldset.epoch-fieldset > legend {
   font-weight: 600;
   pointer-events: none;
 }
+
+.specific-view-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border: 1px solid var(--line-strong, #2c3136);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.specific-view-switch button {
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.specific-view-switch button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink, #0a0c03);
+}

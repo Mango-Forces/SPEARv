@@ -308,6 +308,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/observations/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["observations.query"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/observations/{dataset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["observations.page"];
+        put?: never;
+        post?: never;
+        delete: operations["observations.release"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/observations/{dataset_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["observations.status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/releases": {
         parameters: {
             query?: never;
@@ -340,6 +388,196 @@ export interface paths {
         get: operations["render_png"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sectors/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["sectors.build"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sectors/builds/{build_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["sectors.status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sequences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Builds every submitted sector, in submitted order, with the approved reduction.
+         *     One sequence owns all its frames; a one-sector sequence is a sector build.
+         */
+        post: operations["sequences.create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sequences/{sequence_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["sequences.release"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sequences/{sequence_id}/sectors/{sector_id}/tiles/{x}/{y}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 409 until the shared mapping is frozen, or when the caller's display revision is stale. */
+        get: operations["sequences.tile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sequences/{sequence_id}/sectors/{sector_id}/variance/{x}/{y}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Raw per-pixel `SectorVariance(p)` for one 256×256 data tile, as little-endian
+         *     `f32` values in row-major PNG order. No PNG encoding and no display stretch.
+         */
+        get: operations["sequences.variance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sequences/{sequence_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["sequences.status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/snippets/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["snippets.preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/snippets/previews/{preview_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["snippets.release"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/snippets/previews/{preview_id}/tiles/{x}/{y}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["snippets.tile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/snippets/retain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep assigned, filter-hidden exact refs alive without reading image data.
+         *     Every ref that still exists is renewed; expired refs are reported instead of
+         *     aborting the request before later live refs can be renewed.
+         */
+        post: operations["snippets.retain"];
         delete?: never;
         options?: never;
         head?: never;
@@ -399,6 +637,38 @@ export interface components {
         };
         /** @enum {string} */
         ArtifactState: "not_requested" | "queued" | "rendering" | "ready" | "failed" | "superseded" | "evicted";
+        /**
+         * @description Aggregate summary for one declared band. This is status convenience only;
+         *     the authoritative per-pixel accepted counts are the sparse little-endian
+         *     `u64` cells in the sector's count sidecar.
+         */
+        BandContribution: {
+            /**
+             * Format: int32
+             * @description UI band number, 1–102.
+             */
+            band: number;
+            /**
+             * Format: int64
+             * @description Cropped little-endian `u64` count-cell bytes stored for this band.
+             */
+            bytes: number;
+            /**
+             * Format: int64
+             * @description Pixels with at least one accepted measurement.
+             */
+            pixels: number;
+            /**
+             * Format: int64
+             * @description Total accepted measurements in this band, including repeated depth.
+             */
+            samples: number;
+            /**
+             * Format: int32
+             * @description Non-zero tiles stored in the count sidecar for this band.
+             */
+            tiles: number;
+        };
         BandCoverage: {
             /** Format: double */
             center_um: number;
@@ -655,6 +925,10 @@ export interface components {
              */
             visit?: number | null;
         };
+        GeometryFailure: {
+            error: string;
+            key: string;
+        };
         Layer: {
             black_white: components["schemas"]["BlackWhite"];
             enabled: boolean;
@@ -684,6 +958,16 @@ export interface components {
              * @description PNG row on the render grid, origin at the top.
              */
             y: number;
+        };
+        /**
+         * @description Exact provenance for one admitted member. Array order is submitted sector
+         *     order, never the canonical execution order.
+         */
+        MemberRef: {
+            etag?: string | null;
+            region: components["schemas"]["ObservationRegion"];
+            s3_key: string;
+            snippet: components["schemas"]["SnippetRow"];
         };
         MosaicInfo: {
             /** Format: int32 */
@@ -776,6 +1060,79 @@ export interface components {
             mag?: number | null;
             /** Format: double */
             separation_px: number;
+        };
+        ObservationApiError: {
+            error: string;
+        };
+        ObservationPage: {
+            error?: string | null;
+            failed_files: number;
+            matches_so_far: number;
+            pending_files: number;
+            /** Format: int64 */
+            revision: number;
+            rows: components["schemas"]["SnippetRow"][];
+            /** @description True when this list resolved a quick-video sample, not every coverage file. */
+            sampled: boolean;
+            sampled_from: number;
+            state: string;
+        };
+        ObservationQuery: {
+            /** @description Semicolon-separated UI bands/ranges, 1–102 inclusive. */
+            bands: string;
+            from_utc?: string | null;
+            /**
+             * @description Quick-video sampling: resolve at most this many candidate exposures per
+             *     visit instead of every exposure. Manual listing leaves it unset.
+             */
+            per_visit?: number | null;
+            region: components["schemas"]["ObservationRegion"];
+            releases: string[];
+            to_utc?: string | null;
+            /**
+             * Format: double
+             * @description Gap that starts a new visit for `per_visit` sampling. Defaults to 10 days.
+             */
+            visit_gap_days?: number | null;
+        };
+        ObservationRegion: {
+            /** Format: double */
+            dec: number;
+            /**
+             * Format: double
+             * @description Square field in degrees. Legacy clients send only this; when `fov_l`
+             *     and `fov_h` are present they are the authoritative axes.
+             */
+            fov: number;
+            /** Format: double */
+            fov_h?: number | null;
+            /** Format: double */
+            fov_l?: number | null;
+            /** Format: double */
+            ra: number;
+        };
+        ObservationStatus: {
+            candidate_files: number;
+            dataset_id: string;
+            error?: string | null;
+            failed_files: number;
+            failures: components["schemas"]["GeometryFailure"][];
+            /** Format: int64 */
+            generation?: number | null;
+            /** Format: int64 */
+            geometry_bytes: number;
+            /** Format: int64 */
+            geometry_requests: number;
+            resolved_files: number;
+            /** Format: int64 */
+            revision: number;
+            sampled: boolean;
+            /**
+             * @description Coverage candidates before quick-video sampling. Equals
+             *     `candidate_files` when `sampled` is false.
+             */
+            sampled_from: number;
+            state: string;
         };
         PinMark: {
             /** Format: int32 */
@@ -887,6 +1244,185 @@ export interface components {
             default_release: string;
             releases: components["schemas"]["ReleaseInfo"][];
         };
+        /**
+         * @description Every requested ref is accounted for: `renewed` when its idle lease was
+         *     renewed, `missing` when it no longer exists and must be rediscovered.
+         */
+        RetainResult: {
+            missing: string[];
+            renewed: string[];
+        };
+        /** @description One sector build handle and its current metadata. */
+        SectorBuildInfo: {
+            build_id: string;
+            error?: string | null;
+            /** Format: int32 */
+            height: number;
+            reduction: string;
+            sector: components["schemas"]["SectorFrameInfo"];
+            /** @description queued, building, ready or failed. */
+            state: string;
+            /** Format: int32 */
+            tile_size: number;
+            /** Format: int32 */
+            width: number;
+        };
+        /**
+         * @description A sector build owns one sector recipe. The server validates that every
+         *     snippet belongs to exactly this sector before reading any data.
+         */
+        SectorBuildRequest: {
+            region: components["schemas"]["ObservationRegion"];
+            sector: components["schemas"]["SequenceSector"];
+        };
+        /**
+         * @description Per-sector calibrated result metadata. The frame itself is a per-boot
+         *     numerical artifact keyed by `fingerprint`, never a PNG or a display mapping.
+         */
+        SectorFrameInfo: {
+            /** @description UI band numbers, 1–102. */
+            bands: number[];
+            /** Format: int64 */
+            bytes_read: number;
+            /**
+             * Format: int64
+             * @description Pixels where every selected band has a valid measurement.
+             */
+            complete_pixels: number;
+            /**
+             * @description Aggregate per-band summary only; the sparse per-pixel counts live in the
+             *     sidecar. `None` means the build failed before every band was accumulated.
+             */
+            contributions?: components["schemas"]["BandContribution"][] | null;
+            /**
+             * Format: int64
+             * @description Sparse little-endian `u64` count-sidecar bytes retained for this sector;
+             *     `None` when no sidecar is retained.
+             */
+            count_bytes?: number | null;
+            /** @description Tiles that hold data in this frame, ordered by row then column. Other tiles are no-data. */
+            data_tiles: components["schemas"]["TileCoordinate"][];
+            error?: string | null;
+            /**
+             * @description SHA-256 over the canonical recipe and admitted member identities. Sector
+             *     name/ID, editor revision and submitted order are excluded.
+             */
+            fingerprint: string;
+            id: string;
+            /** @description Exact admitted members in submitted order. */
+            members: components["schemas"]["MemberRef"][];
+            /** Format: double */
+            mjd_end: number;
+            /** Format: double */
+            mjd_start: number;
+            releases: string[];
+            /** Format: int64 */
+            requests: number;
+            /** Format: int64 */
+            revision: number;
+            snippets: number;
+            /** @description queued, building, ready or failed. */
+            state: string;
+            /**
+             * Format: double
+             * @description Fraction of the 7-native-pixel target aperture with a complete pixel.
+             */
+            target_coverage: number;
+            /** @description `target_coverage` is at least 0.2; the field centre is not a data hole. */
+            target_covered: boolean;
+            utc_end: string;
+            utc_start: string;
+        };
+        SequenceInfo: {
+            /**
+             * Format: int64
+             * @description Set once one shared mapping is frozen over every frame.
+             */
+            display_revision?: number | null;
+            error?: string | null;
+            /** Format: int32 */
+            height: number;
+            reduction: string;
+            sectors: components["schemas"]["SectorFrameInfo"][];
+            sequence_id: string;
+            /** @description building, ready or failed. Tiles exist only when ready. */
+            state: string;
+            /** Format: float */
+            stretch_high?: number | null;
+            /** Format: float */
+            stretch_low?: number | null;
+            /** Format: int32 */
+            tile_size: number;
+            /** Format: int32 */
+            width: number;
+        };
+        /** @description Array order is playback order; the server never re-sorts it. */
+        SequenceRequest: {
+            region: components["schemas"]["ObservationRegion"];
+            sectors: components["schemas"]["SequenceSector"][];
+        };
+        /** @description One sector as submitted. Membership is the exact snippet refs, not table filters. */
+        SequenceSector: {
+            id: string;
+            /** Format: int64 */
+            revision: number;
+            snippets: string[];
+        };
+        SnippetPreviewInfo: {
+            /** Format: int64 */
+            bytes_read: number;
+            /** @description Tiles that hold finite preview data, ordered by row then column. Other tiles are no-data. */
+            data_tiles: components["schemas"]["TileCoordinate"][];
+            /** Format: int32 */
+            height: number;
+            preview_id: string;
+            /** Format: int64 */
+            requests: number;
+            snippet: components["schemas"]["SnippetRow"];
+            state: string;
+            /** Format: float */
+            stretch_high: number;
+            /** Format: float */
+            stretch_low: number;
+            /** Format: int32 */
+            tile_size: number;
+            /** Format: int64 */
+            valid_samples: number;
+            /** Format: int32 */
+            width: number;
+        };
+        SnippetPreviewRequest: {
+            mask: boolean;
+            region: components["schemas"]["ObservationRegion"];
+            snippet_ref: string;
+        };
+        SnippetRow: {
+            /** Format: int32 */
+            band: number;
+            /** Format: int32 */
+            detector: number;
+            /** Format: int64 */
+            geometric_samples: number;
+            id: string;
+            /** Format: double */
+            mjd: number;
+            obsid: string;
+            /** @description Raw header quality, including unknown/null fields; never inferred clean. */
+            quality: Record<string, never>;
+            release: string;
+            snippet_ref: string;
+            /**
+             * @description Discovery-time hint: this detector's footprint reaches the field centre.
+             *     The built frame's `target_coverage` is the authoritative check.
+             */
+            target_covered?: boolean;
+            utc: string;
+            version: string;
+            /** Format: double */
+            wl_max_um: number;
+            /** Format: double */
+            wl_min_um: number;
+        };
         SpectrumBody: {
             /** Format: double */
             dec: number;
@@ -896,6 +1432,16 @@ export interface components {
             /** Format: double */
             ra: number;
             release: string;
+            /** Format: int32 */
+            x: number;
+            /** Format: int32 */
+            y: number;
+        };
+        /**
+         * @description Grid PNG tile coordinates. A client can request a tile only at these
+         *     coordinates; any other coordinate is no-data.
+         */
+        TileCoordinate: {
             /** Format: int32 */
             x: number;
             /** Format: int32 */
@@ -1928,6 +2474,121 @@ export interface operations {
             };
         };
     };
+    "observations.query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObservationQuery"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationStatus"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
+    "observations.page": {
+        parameters: {
+            query?: {
+                search?: string;
+                sort?: string;
+                direction?: string;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationPage"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
+    "observations.release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Discovery cancelled and snapshot released; snippet refs retain their idle lease */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "observations.status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationStatus"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
     releases: {
         parameters: {
             query?: never;
@@ -2032,6 +2693,374 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "sectors.build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SectorBuildRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SectorBuildInfo"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
+    "sectors.status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                build_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SectorBuildInfo"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
+    "sequences.create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SequenceRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SequenceInfo"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
+    "sequences.release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sequence_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sequence work cancelled and frames released */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "sequences.tile": {
+        parameters: {
+            query: {
+                display_revision: number;
+            };
+            header?: never;
+            path: {
+                sequence_id: string;
+                sector_id: string;
+                x: number;
+                y: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
+    "sequences.variance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sequence_id: string;
+                sector_id: string;
+                x: number;
+                y: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
+    "sequences.status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sequence_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SequenceInfo"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
+    "snippets.preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SnippetPreviewRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnippetPreviewInfo"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
+    "snippets.release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Preview resources released */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "snippets.tile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preview_id: string;
+                x: number;
+                y: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
+                };
+            };
+        };
+    };
+    "snippets.retain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": string[];
+            };
+        };
+        responses: {
+            /** @description Every live ref was renewed; missing refs are reported */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetainResult"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationApiError"];
                 };
             };
         };

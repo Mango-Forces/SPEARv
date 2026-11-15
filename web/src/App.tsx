@@ -22,6 +22,8 @@ import { DEFAULT_BOUNDS, boundsKey, isDefaultBounds } from "./features/specific/
 import type { Bounds } from "./features/specific/bounds"
 import { EpochPlayer } from "./features/specific/EpochPlayer"
 import { EpochBandsControl, EpochDatesControl } from "./features/specific/SpecificControls"
+import { SpecificViewSwitch, type SpecificView } from "./features/specific/ViewSwitch"
+import { SpecificWorkspace } from "./features/specific/lab/SpecificWorkspace"
 import { FOV_WARN_DEG, MAX_FOV, formatNumber, isLargeField, parseDec, parseFov, parseRa } from "./url-state/position"
 import {
   commit,
@@ -114,6 +116,8 @@ function ValidViewApp({ view }: { view: View }) {
   const [find, setFind] = useState<{ key: string; run: number } | null>(null)
   const [stopping, setStopping] = useState(false)
   const [epochBusy, setEpochBusy] = useState<{ run: number; busy: boolean }>()
+  const [specificView, setSpecificView] = useState<SpecificView>("blink")
+  const [labBusy, setLabBusy] = useState(false)
   const findRun = useRef(0)
   const [point, setPoint] = useState<SpectrumPointTarget | null>(null)
   const [catalogStatus, setCatalogStatus] = useState<Record<CatalogSource, CatalogState | undefined>>({
@@ -161,7 +165,9 @@ function ValidViewApp({ view }: { view: View }) {
   // Specific has no engine job to drain: its busy state is the open frame
   // requests, reported per run so a fresh Find shows Stop at once.
   const finding =
-    workspace === "specific"
+    workspace === "specific" && specificView === "lab"
+      ? armed && labBusy
+      : workspace === "specific"
       ? armed && (epochBusy?.run === find?.run ? epochBusy.busy : true)
       : stopping || (armed && (rawControls ? rawControls.mosaicBusy : true))
   const findNow = (next: View) => {
@@ -547,6 +553,34 @@ function ValidViewApp({ view }: { view: View }) {
         data-mode={workspace}
         aria-label="Sky workspace"
       >
+        {workspace === "specific" && specificView === "lab" ? (
+          <SpecificWorkspace
+            region={{ ra: view.ra, dec: view.dec, fovL: view.fovL, fovH: view.fovH }}
+            active
+            armed={armed}
+            onBusy={setLabBusy}
+            switcher={<SpecificViewSwitch value={specificView} onChange={setSpecificView} />}
+            releases={releases}
+            bounds={bounds}
+            onBoundsChange={applyBounds}
+            onViewChange={(next) => commit({ ...view, ra: next.ra, dec: next.dec, bounds: isDefaultBounds(next.bounds) ? undefined : next.bounds })}
+            onQuickView={(next) => {
+              const nextView = { ...view, ra: next.ra, dec: next.dec, bounds: isDefaultBounds(next.bounds) ? undefined : next.bounds }
+              commit(nextView)
+              findNow(nextView)
+            }}
+            editorOpen={controlsOpen}
+            onEditorOpenChange={setControlsOpen}
+            gaia={view.gaia}
+            wise={view.wise}
+            onCatalogStatus={onCatalogStatus}
+            onPoint={(next) => {
+              setPoint(next)
+              if (next) openExtras("pick")
+            }}
+          />
+        ) : null}
+        {workspace === "specific" && specificView === "lab" ? null : (
         <EdgeSidebar
           id="main-controls"
           label={workspace === "color" ? "Color controls" : workspace === "specific" ? "Specific controls" : "Composite controls"}
@@ -577,6 +611,7 @@ function ValidViewApp({ view }: { view: View }) {
               </>
             ) : workspace === "specific" ? (
               <>
+                <SpecificViewSwitch value={specificView} onChange={setSpecificView} />
                 <details className="leftbar-section" open>
                   <summary>Bands per epoch</summary>
                   <EpochBandsControl bounds={bounds} onApply={applyBounds} />
@@ -637,7 +672,8 @@ function ValidViewApp({ view }: { view: View }) {
             )}
           </div>
         </EdgeSidebar>
-        {workspace === "specific" ? (
+        )}
+        {workspace === "specific" && specificView === "lab" ? null : workspace === "specific" ? (
           <EpochPlayer
             view={view}
             bounds={bounds}
