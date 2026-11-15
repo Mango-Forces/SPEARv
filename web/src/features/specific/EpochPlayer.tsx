@@ -10,7 +10,10 @@ import {
   paintDifference,
   paintPlane,
   paintSum,
+  resolveStretch,
   sharedStretch,
+  TONE_SOFT,
+  type DisplayTone,
   type Stretch,
 } from "./calibrate"
 import { formatMjdDate, mjdToMs, qualityFlags, stepReady, type ExposureRow } from "./frames"
@@ -48,10 +51,16 @@ export function EpochPlayer(props: {
   const epochs = useCalibratedFrames(view, bounds, armed, run + customRun * 1000, custom)
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(() => !window.matchMedia("(prefers-reduced-motion: reduce)").matches)
-  const [perSecond, setPerSecond] = useState(2)
-  const [show, setShow] = useState<Show>("epoch")
+    const [show, setShow] = useState<Show>("epoch")
   const [loop, setLoop] = useState(true)
   const [tableOpen, setTableOpen] = useState(false)
+  // WiseView-style display: linear + invert is the classic motion blink.
+  const [invert, setInvert] = useState(false)
+  const [linear, setLinear] = useState(false)
+  const [manualLow, setManualLow] = useState<string>("")
+  const [manualHigh, setManualHigh] = useState<string>("")
+  // Blink interval in ms, same unit WiseView uses (speed=500 → 500 ms).
+  const [intervalMs, setIntervalMs] = useState(500)
 
   const ready = epochs.frames.flatMap((frame, at) => (frame.state === "ready" && frame.plane ? [at] : []))
   const readyKey = ready.join(",")
@@ -63,13 +72,23 @@ export function EpochPlayer(props: {
   const width = first?.width
   const height = first?.height
   const busy = epochs.phase === "listing" || epochs.phase === "loading"
-  const stretch = useMemo<Stretch | undefined>(() => {
+  const autoStretch = useMemo<Stretch | undefined>(() => {
     const planes = ready.flatMap((at) => {
       const plane = epochs.frames[at]?.plane
       return plane ? [plane] : []
     })
     return planes.length ? sharedStretch(planes) : undefined
   }, [readyKey, epochs.frames])
+  const stretch = useMemo<Stretch | undefined>(() => {
+    if (!autoStretch) return undefined
+    const low = manualLow.trim() === "" ? null : Number(manualLow)
+    const high = manualHigh.trim() === "" ? null : Number(manualHigh)
+    return resolveStretch(autoStretch, low, high)
+  }, [autoStretch, manualLow, manualHigh])
+  const display: DisplayTone = useMemo(
+    () => ({ gamma: linear ? 1 : TONE_SOFT.gamma, invert }),
+    [linear, invert],
+  )
 
   useEffect(() => {
     props.onBusy({ run, busy: armed && busy })
@@ -93,9 +112,9 @@ export function EpochPlayer(props: {
         }
         return next
       })
-    }, 1000 / perSecond)
+    }, intervalMs)
     return () => clearInterval(timer)
-  }, [playing, show, perSecond, ready.length < 2, loop])
+  }, [playing, show, intervalMs, ready.length < 2, loop])
 
   const mosaic = useMemo<Mosaic | undefined>(() => {
     if (!width || !height) return undefined
@@ -121,21 +140,21 @@ export function EpochPlayer(props: {
     if (!mosaic || !context || !current?.plane || !stretch) return
     const out = context.createImageData(mosaic.info.width, mosaic.info.height)
     if (show === "epoch") {
-      paintPlane(current.plane, stretch, out)
+      paintPlane(current.plane, stretch, out, display)
     } else if (show === "sum") {
       const planes = ready.flatMap((at) => {
         const plane = epochs.frames[at]?.plane
         return plane ? [plane] : []
       })
-      paintSum(planes, stretch, out)
+      paintSum(planes, stretch, out, display)
     } else {
       const referenceAt = show === "first" ? ready[0]! : stepReady(ready, shown ?? 0, -1)
       const reference = epochs.frames[referenceAt]?.plane
       if (!reference) return
-      paintDifference(current.plane, reference, stretch, out)
+      paintDifference(current.plane, reference, stretch, out, display)
     }
     context.putImageData(out, 0, 0)
-  }, [mosaic, current?.plane, show, readyKey, stretch])
+  }, [mosaic, current?.plane, show, readyKey, stretch, display])
 
   const pick = (pixel: { x: number; y: number }) => {
     if (!mosaic || !clicksWork(mosaic)) return
@@ -262,16 +281,18 @@ export function EpochPlayer(props: {
               ))}
             </ol>
             <label className="epoch-option">
-              Speed
+              Blink
               <input
                 type="range"
-                min={1}
-                max={10}
-                step={1}
-                value={perSecond}
-                aria-valuetext={`${perSecond} frames per second`}
-                onChange={(event) => setPerSecond(Number(event.target.value))}
+                min={100}
+                max={1500}
+                step={50}
+                value={intervalMs}
+                aria-valuetext={`${intervalMs} milliseconds`}
+                title={`${intervalMs} ms between frames`}
+                onChange={(event) => setIntervalMs(Number(event.target.value))}
               />
+              <span className="epoch-ms">{intervalMs} ms</span>
             </label>
             <label className="epoch-option">
               Show
@@ -286,6 +307,49 @@ export function EpochPlayer(props: {
             <label className="epoch-option epoch-loop">
               <input type="checkbox" checked={loop} onChange={(event) => setLoop(event.target.checked)} />
               Loop
+            </label>
+            <label className="epoch-option epoch-loop" title="Linear stretch, inverted greyscale — the classic WiseView motion blink">
+              <input
+                type="checkbox"
+                checked={invert && linear}
+                onChange={(event) => {
+                  const on = event.target.checked
+                  setInvert(on)
+                  setLinear(on)
+                  if (on) setIntervalMs(500)
+                }}
+              />
+              WiseView look
+            </label>
+            <label className="epoch-option epoch-loop">
+              <input type="checkbox" checked={invert} onChange={(event) => setInvert(event.target.checked)} />
+              Invert
+            </label>
+            <label className="epoch-option epoch-loop">
+              <input type="checkbox" checked={linear} onChange={(event) => setLinear(event.target.checked)} />
+              Linear
+            </label>
+            <label className="epoch-option" title="Leave blank for the auto shared stretch">
+              Min
+              <input
+                className="epoch-stretch"
+                type="text"
+                inputMode="decimal"
+                placeholder={autoStretch ? autoStretch.low.toPrecision(3) : "auto"}
+                value={manualLow}
+                onChange={(event) => setManualLow(event.target.value)}
+              />
+            </label>
+            <label className="epoch-option" title="Leave blank for the auto shared stretch">
+              Max
+              <input
+                className="epoch-stretch"
+                type="text"
+                inputMode="decimal"
+                placeholder={autoStretch ? autoStretch.high.toPrecision(3) : "auto"}
+                value={manualHigh}
+                onChange={(event) => setManualHigh(event.target.value)}
+              />
             </label>
           </div>
         ) : null}
@@ -308,6 +372,8 @@ export function EpochPlayer(props: {
           {stretch ? (
             <span title="Shared display stretch across every frame">
               stretch {stretch.low.toPrecision(3)}–{stretch.high.toPrecision(3)} MJy/sr
+              {invert ? " · inverted" : ""}
+              {linear ? " · linear" : ""}
             </span>
           ) : null}
           {mosaic ? (

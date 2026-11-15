@@ -1,6 +1,8 @@
 /** Shared display math for calibrated Specific frames. Values are MJy/sr;
  * NaN is no data. Every frame of one run uses one stretch so brightness
- * changes across epochs are real, not per-frame autoscaling. */
+ * changes across epochs are real, not per-frame autoscaling.
+ *
+ * Display options mirror WiseView: fixed min/max, linear or soft stretch, invert. */
 
 export type FramePlane = {
   width: number
@@ -11,8 +13,17 @@ export type FramePlane = {
 
 export type Stretch = { low: number; high: number; span: number }
 
+/** How physical values become grey. WiseView defaults are linear + invert. */
+export type DisplayTone = {
+  /** 1 = linear (WiseView); lower lifts the faint end. */
+  gamma: number
+  invert: boolean
+}
+
+export const TONE_SOFT: DisplayTone = { gamma: 0.7, invert: false }
+export const TONE_WISEVIEW: DisplayTone = { gamma: 1, invert: true }
+
 const NO_DATA_RGB: [number, number, number] = [24, 28, 36]
-const DISPLAY_GAMMA = 0.7
 
 export function percentile(sorted: Float32Array | number[], p: number): number {
   if (sorted.length === 0) return 0
@@ -21,7 +32,7 @@ export function percentile(sorted: Float32Array | number[], p: number): number {
 }
 
 /** One shared stretch over every finite sample of every frame. */
-export function sharedStretch(planes: readonly FramePlane[]): Stretch {
+export function sharedStretch(planes: readonly FramePlane[], lowP = 0.02, highP = 0.995): Stretch {
   const samples: number[] = []
   for (const plane of planes) {
     for (const value of plane.values) {
@@ -30,61 +41,82 @@ export function sharedStretch(planes: readonly FramePlane[]): Stretch {
   }
   samples.sort((a, b) => a - b)
   if (samples.length === 0) return { low: 0, high: 1, span: 1 }
-  const low = percentile(samples, 0.02)
-  const high = percentile(samples, 0.995)
+  const low = percentile(samples, lowP)
+  const high = percentile(samples, highP)
   const span = high > low ? high - low : 1
   return { low, high, span }
 }
 
-export function tone(value: number, stretch: Stretch): number {
-  const t = Math.pow(Math.min(1, Math.max(0, (value - stretch.low) / stretch.span)), DISPLAY_GAMMA)
+/** Manual stretch bounds; falls back to auto when either end is missing. */
+export function resolveStretch(auto: Stretch, low: number | null, high: number | null): Stretch {
+  const lo = low === null || !Number.isFinite(low) ? auto.low : low
+  const hi = high === null || !Number.isFinite(high) ? auto.high : high
+  const span = hi > lo ? hi - lo : 1
+  return { low: lo, high: hi, span }
+}
+
+export function tone(value: number, stretch: Stretch, display: DisplayTone = TONE_SOFT): number {
+  let t = Math.min(1, Math.max(0, (value - stretch.low) / stretch.span))
+  if (display.gamma !== 1) t = Math.pow(t, display.gamma)
+  if (display.invert) t = 1 - t
   return Math.round(t * 255)
 }
 
+function writeGrey(rgb: Uint8ClampedArray, p: number, grey: number) {
+  rgb[p] = grey
+  rgb[p + 1] = grey
+  rgb[p + 2] = grey
+  rgb[p + 3] = 255
+}
+
+function writeNoData(rgb: Uint8ClampedArray, p: number) {
+  rgb[p] = NO_DATA_RGB[0]
+  rgb[p + 1] = NO_DATA_RGB[1]
+  rgb[p + 2] = NO_DATA_RGB[2]
+  rgb[p + 3] = 255
+}
+
 /** Paint one plane through a shared stretch. Missing samples become no-data. */
-export function paintPlane(plane: FramePlane, stretch: Stretch, out: ImageData): void {
+export function paintPlane(plane: FramePlane, stretch: Stretch, out: ImageData, display: DisplayTone = TONE_SOFT): void {
   const rgb = out.data
   for (let i = 0, p = 0; i < plane.values.length; i++, p += 4) {
     const value = plane.values[i]!
     if (!Number.isFinite(value)) {
-      rgb[p] = NO_DATA_RGB[0]
-      rgb[p + 1] = NO_DATA_RGB[1]
-      rgb[p + 2] = NO_DATA_RGB[2]
-      rgb[p + 3] = 255
+      writeNoData(rgb, p)
       continue
     }
-    const grey = tone(value, stretch)
-    rgb[p] = grey
-    rgb[p + 1] = grey
-    rgb[p + 2] = grey
-    rgb[p + 3] = 255
+    writeGrey(rgb, p, tone(value, stretch, display))
   }
 }
 
-/** Calibrated difference painted as mid-grey zero. White is brighter in `a`. */
-export function paintDifference(a: FramePlane, b: FramePlane, stretch: Stretch, out: ImageData, gain = 1.5): void {
+/** Calibrated difference painted as mid-grey zero. With invert off, white is
+ * brighter in `a`; invert flips that, matching WiseView difference blinks. */
+export function paintDifference(
+  a: FramePlane,
+  b: FramePlane,
+  stretch: Stretch,
+  out: ImageData,
+  display: DisplayTone = TONE_SOFT,
+  gain = 1.5,
+): void {
   const rgb = out.data
   const half = stretch.span / 2
   for (let i = 0, p = 0; i < a.values.length; i++, p += 4) {
     const left = a.values[i]!
     const right = b.values[i]!
     if (!Number.isFinite(left) || !Number.isFinite(right)) {
-      rgb[p] = NO_DATA_RGB[0]
-      rgb[p + 1] = NO_DATA_RGB[1]
-      rgb[p + 2] = NO_DATA_RGB[2]
-      rgb[p + 3] = 255
+      writeNoData(rgb, p)
       continue
     }
-    const grey = Math.round(Math.min(255, Math.max(0, 128 + ((left - right) / half) * 128 * gain)))
-    rgb[p] = grey
-    rgb[p + 1] = grey
-    rgb[p + 2] = grey
-    rgb[p + 3] = 255
+    let t = 0.5 + ((left - right) / half) * 0.5 * gain
+    t = Math.min(1, Math.max(0, t))
+    if (display.invert) t = 1 - t
+    writeGrey(rgb, p, Math.round(t * 255))
   }
 }
 
 /** Equal-weight mean of the planes that have a finite sample at each pixel. */
-export function paintSum(planes: readonly FramePlane[], stretch: Stretch, out: ImageData): void {
+export function paintSum(planes: readonly FramePlane[], stretch: Stretch, out: ImageData, display: DisplayTone = TONE_SOFT): void {
   const rgb = out.data
   const n = planes[0]?.values.length ?? 0
   for (let i = 0, p = 0; i < n; i++, p += 4) {
@@ -97,17 +129,10 @@ export function paintSum(planes: readonly FramePlane[], stretch: Stretch, out: I
       count += 1
     }
     if (count === 0) {
-      rgb[p] = NO_DATA_RGB[0]
-      rgb[p + 1] = NO_DATA_RGB[1]
-      rgb[p + 2] = NO_DATA_RGB[2]
-      rgb[p + 3] = 255
+      writeNoData(rgb, p)
       continue
     }
-    const grey = tone(total / count, stretch)
-    rgb[p] = grey
-    rgb[p + 1] = grey
-    rgb[p + 2] = grey
-    rgb[p + 3] = 255
+    writeGrey(rgb, p, tone(total / count, stretch, display))
   }
 }
 

@@ -204,3 +204,16 @@ fieldset.epoch-fieldset > legend {
 .epoch-table tr[data-dirty] td {
   color: var(--warn, #e6b84d);
 }
+
+.epoch-ms {
+  min-width: 3.5rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.epoch-stretch {
+  width: 4.5rem;
+  height: 28px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
