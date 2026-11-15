@@ -8,6 +8,7 @@ import {
   type DisplayManifest,
 } from "./server-display-protocol.ts"
 import type { RenderGate } from "./raw-protocol.ts"
+import { BASE } from "../../api.ts"
 
 export type ColorDisplaySnapshot = {
   phase: ColorDisplayPhase
@@ -514,7 +515,7 @@ export class ServerDisplayClient {
   }
 
   private endpoint(path: string): string {
-    return `/api/v1/mosaic/${encodeURIComponent(this.expected.jobId)}/${path}`
+    return `${BASE}/api/v1/mosaic/${encodeURIComponent(this.expected.jobId)}/${path}`
   }
 
   private clearTimers() {

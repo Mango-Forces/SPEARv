@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import type { View } from "../../url-state/view"
+import { BASE } from "../../api"
 
 /** One labelled blob from `GET /api/v1/delta/candidates`. */
 export type Candidate = {
@@ -70,7 +71,7 @@ export function useCandidates(view: View, ready: boolean): CandidateState {
     const controller = new AbortController()
     let live = true
     setState({ status: "loading" })
-    fetch(`/api/v1/delta/candidates?${key}`, { signal: controller.signal })
+    fetch(`${BASE}/api/v1/delta/candidates?${key}`, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) {
           const body = await response.json().catch(() => null)

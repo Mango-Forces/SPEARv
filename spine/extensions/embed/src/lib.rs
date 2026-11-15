@@ -141,13 +141,15 @@ fn delta_pins_ok(pins: &[Pin]) -> bool {
 
 fn page(view: &View) -> String {
     let query = canonical_query(view);
+    // Relative to the embed page, so the same HTML works at the site root and
+    // behind a path prefix such as `/SPEARv/embed`.
     let image_path = if view.mode == Mode::Delta {
-        "/api/v1/delta.png"
+        "api/v1/delta.png"
     } else {
-        "/api/v1/render.png"
+        "api/v1/render.png"
     };
     let image = html_escape(&format!("{image_path}?{query}"));
-    let full = html_escape(&format!("/?{query}"));
+    let full = html_escape(&format!("./?{query}"));
     let alt = format!(
         "SPHEREx view at right ascension {:.3} degrees, declination {:.3} degrees",
         view.region.ra, view.region.dec
@@ -295,9 +297,9 @@ mod tests {
     #[test]
     fn html_escapes_attributes_and_uses_the_delta_route() {
         let html = page(&view());
-        assert!(html.contains("/api/v1/delta.png?"), "{html}");
+        assert!(html.contains("src=\"api/v1/delta.png?"), "{html}");
         assert!(html.contains("&amp;pin="), "{html}");
-        assert!(html.contains("href=\"/?ra=56.75"), "{html}");
+        assert!(html.contains("href=\"./?ra=56.75"), "{html}");
         assert!(!html.contains("<script>"), "{html}");
     }
 

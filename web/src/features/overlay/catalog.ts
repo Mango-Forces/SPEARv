@@ -1,4 +1,5 @@
 import { formatNumber } from "../../url-state/position"
+import { BASE } from "../../api"
 
 /** Catalog marker layer. The server projects each row to PNG pixels with
  * `sky_to_png_pixel`, the inverse of the click grid, so React draws the
@@ -57,7 +58,7 @@ export async function fetchCatalog(source: CatalogSource, query: CatalogQuery, s
     params.set("epoch_mjd", formatNumber(query.epochMjd))
   }
   const label = source === "gaia" ? "Gaia" : "WISE"
-  const target = `/api/v1/catalog/${source}?${params.toString()}`
+  const target = `${BASE}/api/v1/catalog/${source}?${params.toString()}`
   let response: Response
   try {
     response = await fetch(target, { signal })

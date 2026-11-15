@@ -261,7 +261,7 @@ export function readView(search: string): View {
 // The root page defaults to colour mode. A copied link always carries its own
 // parameters, so only the bare page redirects.
 if (typeof window !== "undefined" && (window.location.search === "" || window.location.search === "?")) {
-  window.history.replaceState(null, "", "/?ra=56.75&dec=24.12&fov_l=1&fov_h=1&mode=color&mask=off")
+  window.history.replaceState(null, "", `${window.location.pathname}?ra=56.75&dec=24.12&fov_l=1&fov_h=1&mode=color&mask=off`)
 }
 
 let snapshot: View = typeof window === "undefined" ? DEFAULTS : readView(window.location.search)

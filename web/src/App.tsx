@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react"
-import { client } from "./api"
+import { BASE, client } from "./api"
 import { ColourConfig } from "./features/colour/ColourConfig"
 import { DEFAULT_COLOUR_CONFIG, type ColourConfigValue } from "./url-state/colour"
 import { clicksWork } from "./features/mosaic/MosaicPicture"
@@ -81,7 +81,7 @@ export function App() {
     return (
       <div className="app">
         <header className="topbar">
-          <a className="brand" href="/" aria-label="SPEARv home"><img src={LOGO} alt="SPEARv" /></a>
+          <a className="brand" href={`${BASE}/`} aria-label="SPEARv home"><img src={LOGO} alt="SPEARv" /></a>
         </header>
         <main className="workspace" aria-label="Invalid link">
           <section className="stage">
@@ -400,7 +400,7 @@ function ValidViewApp({ view }: { view: View }) {
     <div className="app">
       <div className="topbar-shell" data-cue={railCue}>
         <header ref={topbarRef} className="topbar">
-        <a className="brand" href="/" aria-label="SPEARv home">
+        <a className="brand" href={`${BASE}/`} aria-label="SPEARv home">
           <img src={LOGO} alt="SPEARv" />
         </a>
         <form id="location-form" className="location" onSubmit={submit} noValidate>

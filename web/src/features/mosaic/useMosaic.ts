@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { client } from "../../api"
+import { BASE, client } from "../../api"
 import type { components } from "../../bindings/schema"
 import { DEFAULT_COLOUR_BANDS, type ColourBands } from "../../url-state/colour"
 import { formatPin, type View } from "../../url-state/view"
@@ -204,7 +204,7 @@ export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS,
 /** Stop the engine job as well as this page, so nothing keeps reading files. */
 async function cancelJob(id: string) {
   try {
-    await fetch(`/api/v1/mosaic/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true })
+    await fetch(`${BASE}/api/v1/mosaic/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true })
   } catch {
     // A vanished engine already has nothing left to cancel.
   }

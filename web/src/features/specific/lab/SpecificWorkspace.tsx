@@ -11,7 +11,7 @@ import type { View } from "../../../url-state/view"
 import { SectorsEditor } from "./SectorsEditor"
 import { ObservationTable } from "./ObservationTable"
 import { SectorTimeline, type TransportState } from "./SectorTimeline"
-import { client } from "../../../api"
+import { BASE, client } from "../../../api"
 import { initialSectorState, sectorMembers, sectorReducer, type Region, type SectorState, type Snippet } from "./state"
 import { useObservations } from "./useObservations"
 import { useSnippetPreview } from "./useSnippetPreview"
@@ -670,7 +670,7 @@ function scale(info: SequenceInfo) {
 /** Renew every owned ref. A successful renew returns undefined even when the
  * server chose 200 rather than 204 for a body-less success. */
 async function renewLeases(refs: string[], signal: AbortSignal): Promise<{ missing: string[]; message?: string } | undefined> {
-  const response = await fetch("/api/v1/snippets/retain", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(refs), signal })
+  const response = await fetch(`${BASE}/api/v1/snippets/retain`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(refs), signal })
   if (response.status === 204) return undefined
   const body: unknown = await response.json().catch(() => undefined)
   const missing = retainMissing(body)

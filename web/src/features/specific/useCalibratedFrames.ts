@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { BASE } from "../../api"
 import type { View } from "../../url-state/view"
 import type { Bounds } from "./bounds"
 import { boundsKey } from "./link"
@@ -150,7 +151,7 @@ async function fetchExposures(view: View, signal: AbortSignal): Promise<{ visits
     fov_h: String(view.fovH),
     dr: view.dr,
   })
-  const response = await fetch(`/api/v1/exposures?${params}`, { signal })
+  const response = await fetch(`${BASE}/api/v1/exposures?${params}`, { signal })
   if (!response.ok) {
     const body = await response.json().catch(() => undefined)
     throw new Error(typeof body?.error === "string" ? body.error : `Exposures failed (${response.status}).`)
@@ -167,7 +168,7 @@ async function fetchExposures(view: View, signal: AbortSignal): Promise<{ visits
 
 async function renderFrame(body: ReturnType<typeof frameBody>, signal: AbortSignal): Promise<Partial<CalibratedFrame>> {
   try {
-    const response = await fetch("/api/v1/frame", {
+    const response = await fetch(`${BASE}/api/v1/frame`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/octet-stream" },
       body: JSON.stringify(body),

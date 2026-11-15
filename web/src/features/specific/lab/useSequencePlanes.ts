@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import type { FramePlane } from "../calibrate"
 import type { SequenceInfo } from "./useSequence"
+import { BASE } from "../../../api"
 
 export type SectorPlane = { state: "loading" | "ready" | "failed"; plane?: FramePlane; error?: string }
 
@@ -53,7 +54,7 @@ async function loadPlane(
   for (let start = 0; start < tiles.length; start += PARALLEL) {
     await Promise.all(
       tiles.slice(start, start + PARALLEL).map(async ({ x, y }) => {
-        const url = `/api/v1/sequences/${encodeURIComponent(info.sequence_id)}/sectors/${encodeURIComponent(sectorId)}/values/${x}/${y}`
+        const url = `${BASE}/api/v1/sequences/${encodeURIComponent(info.sequence_id)}/sectors/${encodeURIComponent(sectorId)}/values/${x}/${y}`
         const response = await fetch(url, { signal })
         if (!response.ok) throw new Error(`Values tile ${x},${y} failed (${response.status}).`)
         const tile = new Float32Array(await response.arrayBuffer())

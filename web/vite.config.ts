@@ -13,6 +13,8 @@ const allowedHosts = process.env.SPEARV_WEB_ALLOWED_HOSTS
   : ["localhost", hostname(), ".ts.net"]
 
 export default defineConfig({
+  // The public site serves the build under /SPEARv/; dev stays at the root.
+  base: process.env.SPEARV_BASE ?? "/",
   plugins: [react()],
   server: {
     host: process.env.SPEARV_WEB_HOST ?? "127.0.0.1",

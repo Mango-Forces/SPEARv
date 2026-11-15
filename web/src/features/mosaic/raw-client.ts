@@ -1,5 +1,6 @@
 import { resolveDisplay, type DisplayState } from "../../url-state/display.ts"
 import { AUTO_RAW_PIXELS, rawBytes, validateRawMetadata, type FromRawWorker, type RawErrorCode, type RawMetadata, type RawSessionState, type RenderGate, type ToRawWorker } from "./raw-protocol.ts"
+import { BASE } from "../../api.ts"
 export type RawSnapshot = { state: RawSessionState; metadata: RawMetadata | null; gate: RenderGate }
 export const serverGate = (final: boolean): RenderGate => ({ exportReady: final, remapBusy: false, completedRevision: 0, pendingRevision: null, label: final ? "Server image" : "Finishing server image…" })
 type WorkerPort = { postMessage(message: ToRawWorker, transfer?: Transferable[]): void; terminate(): void;
@@ -55,7 +56,7 @@ export class RawClient {
     const session = this.session
     this.publish({ state: { phase: "loading", loadedTiles: 0, totalTiles: 0 } })
     try {
-      const response = await this.response(`/api/v1/mosaic/${encodeURIComponent(this.expected.id)}/raw-metadata`, this.ac.signal)
+      const response = await this.response(`${BASE}/api/v1/mosaic/${encodeURIComponent(this.expected.id)}/raw-metadata`, this.ac.signal)
       let metadata: RawMetadata
       try { metadata = validateRawMetadata(await response.json(), this.expected) }
       catch { throw new RawFailure("bad-metadata", "Raw metadata does not match this completed mosaic.") }
@@ -108,7 +109,7 @@ export class RawClient {
         const width = Math.min(256, metadata.width - tx * 256), height = Math.min(256, metadata.height - ty * 256)
         const format = metadata.dtype === "u16le" ? "scale16" : "f32"
         const bytes = metadata.dtype === "u16le" ? 2 : 4
-        const response = await this.response(`/api/v1/mosaic/${encodeURIComponent(metadata.job_id)}/tile?x=${tx}&y=${ty}&channel=${channel}&format=${format}`, signal)
+        const response = await this.response(`${BASE}/api/v1/mosaic/${encodeURIComponent(metadata.job_id)}/tile?x=${tx}&y=${ty}&channel=${channel}&format=${format}`, signal)
         const buffer = await response.arrayBuffer()
         if (signal.aborted || this.dead || session !== this.session) return
         if (buffer.byteLength !== width * height * bytes) throw new RawFailure("bad-tile", "A raw tile has the wrong byte length.")
