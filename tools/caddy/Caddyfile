@@ -1,4 +1,4 @@
-# SPEARv public site: mango.forces.quest/SPEARv via a Cloudflare Tunnel.
+# SPEARv public site at https://mango.forces.quest/
 # Loopback only; Cloudflare terminates HTTPS and the tunnel connects out.
 {
 	auto_https off
@@ -7,28 +7,35 @@
 :8090 {
 	bind 127.0.0.1
 
-	redir / /SPEARv/ 302
-	redir /SPEARv /SPEARv/ 308
+	# Old /SPEARv bookmarks → same app at the host root.
+	redir /SPEARv / 308
+	redir /SPEARv/ / 308
+	@legacy path_regexp legacy ^/SPEARv/(.*)$
+	redir @legacy /{re.legacy.1} 308
 
-	handle_path /SPEARv/* {
-		@engine path /api/* /embed /embed/*
-		handle @engine {
-			reverse_proxy 127.0.0.1:8787 {
-				flush_interval -1
-			}
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8787 {
+			flush_interval -1
 		}
-		handle {
-			encode zstd gzip
-			root * /var/www/spearv
-			@hashed path /assets/* /fonts/*
-			header @hashed Cache-Control "public, max-age=31536000, immutable"
-			header /index.html Cache-Control "no-cache"
-			try_files {path} /index.html
-			file_server
+	}
+	handle /embed {
+		reverse_proxy 127.0.0.1:8787 {
+			flush_interval -1
+		}
+	}
+	handle /embed/* {
+		reverse_proxy 127.0.0.1:8787 {
+			flush_interval -1
 		}
 	}
 
 	handle {
-		respond "Not found" 404
+		encode zstd gzip
+		root * /var/www/spearv
+		@hashed path /assets/* /fonts/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		header /index.html Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
 	}
 }
