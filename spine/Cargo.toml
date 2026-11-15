@@ -14,6 +14,7 @@ members = [
     "extensions/delta",
     "extensions/overlay",
     "extensions/embed",
+    "extensions/observations",
     "binder",
 ]
 
@@ -36,6 +37,7 @@ spearv-spectrum = { path = "extensions/spectrum" }
 spearv-delta = { path = "extensions/delta" }
 spearv-overlay = { path = "extensions/overlay" }
 spearv-embed = { path = "extensions/embed" }
+spearv-observations = { path = "extensions/observations" }
 async-trait = "0.1"
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }

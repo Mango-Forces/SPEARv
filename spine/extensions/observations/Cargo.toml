@@ -1,0 +1,24 @@
+[package]
+name = "spearv-observations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+spearv-core.workspace = true
+spearv-spherex.workspace = true
+spearv-index = { workspace = true, features = ["client"] }
+axum.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["time"] }
+image.workspace = true
+sha2.workspace = true
+hex.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

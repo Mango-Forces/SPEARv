@@ -13,6 +13,7 @@ path = "src/main.rs"
 spearv-core.workspace = true
 spearv-composite.workspace = true
 spearv-delta.workspace = true
+spearv-observations.workspace = true
 spearv-embed.workspace = true
 spearv-gaia.workspace = true
 spearv-overlay.workspace = true

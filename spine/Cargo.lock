@@ -1952,6 +1952,7 @@ dependencies = [
  "spearv-embed",
  "spearv-gaia",
  "spearv-index",
+ "spearv-observations",
  "spearv-overlay",
  "spearv-science",
  "spearv-spectrum",
@@ -2068,6 +2069,26 @@ dependencies = [
  "spearv-index",
  "spearv-spherex",
  "tokio",
+]
+
+[[package]]
+name = "spearv-observations"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "hex",
+ "image",
+ "serde",
+ "serde_json",
+ "sha2",
+ "spearv-core",
+ "spearv-index",
+ "spearv-spherex",
+ "tokio",
+ "tower",
+ "utoipa",
+ "utoipa-axum",
 ]
 
 [[package]]

@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use spearv_composite::Composite;
 use spearv_core::{env, Cache, Context, Extension, IndexService, WorkBudget};
 use spearv_delta::Delta;
+use spearv_observations::Observations;
 use spearv_embed::Embed;
 use spearv_index::client::IndexClient;
 use spearv_overlay::Overlay;
@@ -22,13 +23,14 @@ use utoipa_axum::router::OpenApiRouter;
 
 /// The extensions the binder mounts, one line each. `/health` reports the same
 /// list, so a route cannot appear without its id there.
-fn extensions() -> Vec<Box<dyn Extension>> {
+fn extensions(index: Option<Arc<IndexClient>>) -> Vec<Box<dyn Extension>> {
     vec![
         Box::new(Composite),
         Box::new(Spectrum),
         Box::new(Delta),
         Box::new(Overlay),
         Box::new(Embed),
+        Box::new(Observations { index }),
     ]
 }
 
@@ -36,7 +38,7 @@ fn extensions() -> Vec<Box<dyn Extension>> {
 async fn main() {
     match parse(std::env::args().skip(1)) {
         Ok(Command::OpenApi(path)) => {
-            let extensions = extensions();
+            let extensions = extensions(None);
             let refs = extensions.iter().map(|extension| extension.as_ref()).collect::<Vec<_>>();
             let json = openapi(&refs).to_pretty_json().expect("openapi json");
             match path {
@@ -45,8 +47,10 @@ async fn main() {
             }
         }
         Ok(Command::Serve) => {
-            let ctx = context();
-            let extensions = extensions();
+            let index = Arc::new(IndexClient::new(index_url()).expect("index-service client"));
+            let ctx = context(Arc::clone(&index));
+            spearv_observations::sweep_sequences();
+            let extensions = extensions(Some(index));
             let refs = extensions.iter().map(|extension| extension.as_ref()).collect::<Vec<_>>();
             let port = env::number("SPEARV_PORT", 8080_u16);
             // Loopback by default. A container needs 0.0.0.0, or the port is unreachable.
@@ -67,8 +71,7 @@ async fn main() {
 
 /// The served context: the SPHEREx source, the process budget, the image math
 /// backend, and the index-service at `index_url()`.
-fn context() -> Arc<Context> {
-    let index = Arc::new(IndexClient::new(index_url()).expect("index-service client"));
+fn context(index: Arc<IndexClient>) -> Arc<Context> {
     let budget = Arc::new(WorkBudget::from_env());
     // The library owns the image math, so the process cannot serve without it.
     // A missing or foreign runtime is a deployment fault and stops the server
@@ -493,9 +496,9 @@ mod tests {
 
     #[test]
     fn the_spec_lists_every_mounted_extension() {
-        let extensions = extensions();
+        let extensions = extensions(None);
         let ids = extensions.iter().map(|extension| extension.id()).collect::<Vec<_>>();
-        assert_eq!(ids, ["composite", "spectrum", "delta", "overlay", "embed"]);
+        assert_eq!(ids, ["composite", "spectrum", "delta", "overlay", "embed", "observations"]);
         let refs = extensions.iter().map(|extension| extension.as_ref()).collect::<Vec<_>>();
         let spec = openapi(&refs);
         assert_eq!(spec.info.title, "SPEARv");
