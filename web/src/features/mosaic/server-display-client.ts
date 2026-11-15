@@ -275,6 +275,7 @@ export class ServerDisplayClient {
       if (this.fullDue) void this.requestFull(generation, value.revision)
       void this.poll(generation, value.revision)
     } catch (error) {
+      if (isAbortError(error) || this.dead) return
       this.fail(generation, error, true)
     }
   }
@@ -305,6 +306,7 @@ export class ServerDisplayClient {
         })
       }
     } catch (error) {
+      if (isAbortError(error) || this.dead) return
       this.fullRequested = false
       this.fail(generation, error, true)
     }
@@ -380,6 +382,7 @@ export class ServerDisplayClient {
       }
       this.pollTimer = setTimeout(() => void this.poll(generation, revision), this.timings.pollMs)
     } catch (error) {
+      if (isAbortError(error) || this.dead) return
       if (this.snapshot.fullBlob) {
         this.settle(this.snapshot.fullBlob, this.snapshot.manifest)
         return
@@ -428,6 +431,7 @@ export class ServerDisplayClient {
    * otherwise this quietly re-creates the revision, or asks the parent to run
    * the view again when the job itself is gone. */
   private recover(generation: number, jobLost: boolean) {
+    if (this.dead || this.ac.signal.aborted) return
     if (!this.isCurrent(generation)) return
     if (this.snapshot.fullBlob) {
       this.settle(this.snapshot.fullBlob, this.snapshot.manifest)
@@ -484,6 +488,8 @@ export class ServerDisplayClient {
   }
 
   private fail(generation: number, error: unknown, preserveBlob = false) {
+    // Dispose aborts in-flight work; that is not a display failure.
+    if (this.dead || isAbortError(error)) return
     if (!this.isCurrent(generation)) return
     if (preserveBlob && this.snapshot.fullBlob) {
       this.settle(this.snapshot.fullBlob, this.snapshot.manifest)
@@ -577,6 +583,13 @@ async function responseError(response: Response, fallback: string): Promise<stri
 }
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "The server display request failed."
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  )
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)

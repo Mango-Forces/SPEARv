@@ -65,6 +65,8 @@ const GLIDE_STEP = 6
 const FINAL_ATTEMPTS = 3
 const COLOR_PROGRESSIVE_EDGE = 1024
 const RECONNECT_MS = 1000
+/** Give up auto-reconnect after this many EngineLost hits for one arm. */
+const MAX_ENGINE_RECONNECTS = 5
 const IDLE: MosaicState = {
   frontier: [],
   arrived: 0,
@@ -153,13 +155,23 @@ export function useMosaic(view: View, bands: ColourBands = DEFAULT_COLOUR_BANDS,
         : {}),
     }
     let timer = 0
+    let reconnects = 0
     const joined = (id: string) => {
       if (!ac.signal.aborted) control.current.jobId = id
     }
     const start = () => {
       follow(query, ac.signal, update, joined).catch((err: unknown) => {
         if (ac.signal.aborted) return
-        if (!(err instanceof EngineLost)) return update({ error: err instanceof Error ? err.message : "the mosaic failed" })
+        if (!(err instanceof EngineLost)) {
+          return update({ error: err instanceof Error ? err.message : "the mosaic failed", reconnecting: false })
+        }
+        reconnects += 1
+        if (reconnects > MAX_ENGINE_RECONNECTS) {
+          return update({
+            reconnecting: false,
+            error: "The engine kept dropping this job. Press Find to try again.",
+          })
+        }
         setState({ ...IDLE, reconnecting: true })
         timer = window.setTimeout(start, RECONNECT_MS)
       })
@@ -429,7 +441,9 @@ async function follow(
         layers.forEach((layer) => { layer.width = 0; layer.height = 0 })
         layers.length = 0
       }
-      update({ final: true, finalRevision: failed.size === 0 ? 1 : 0, frontier: [], arrived: boxes.length, drawing: 0, undrawn: failed.size })
+      // Science is done even when a tile failed; holding finalRevision at 0
+      // blocked Color display forever and left Find spinning on a black stage.
+      update({ final: true, finalRevision: 1, frontier: [], arrived: boxes.length, drawing: 0, undrawn: failed.size })
     }
   }
 

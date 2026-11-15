@@ -43,7 +43,8 @@ export function SharePanel(props: {
   const [copied, setCopied] = useState(false)
   const [copying, setCopying] = useState(false)
   const [copyError, setCopyError] = useState<string>()
-  const [showFallback, setShowFallback] = useState(false)
+  const insecure = typeof window !== "undefined" && !window.isSecureContext
+  const [showFallback, setShowFallback] = useState(() => insecure)
 
   const [formatKey, setFormatKey] = useState<ExportFormatKey>("png")
   const colorImage = isColorImage(view)
@@ -65,10 +66,10 @@ export function SharePanel(props: {
   useEffect(() => {
     setCopied(false)
     setCopyError(undefined)
-    setShowFallback(false)
+    setShowFallback(insecure)
     setExportError(undefined)
     setExported(undefined)
-  }, [search])
+  }, [search, insecure])
 
   // The export control stays disabled until the displayed raster exists. A
   // MutationObserver scoped to <main> flips readiness when the viewer mounts,
@@ -210,19 +211,17 @@ export function SharePanel(props: {
             {copyError}
           </p>
         ) : null}
-        {showFallback ? (
-          <label className="share-fallback">
-            <span>Copy this link manually</span>
-            <input
-              type="text"
-              readOnly
-              value={fullUrl}
-              aria-label="View link"
-              onFocus={(event) => event.currentTarget.select()}
-              onClick={(event) => event.currentTarget.select()}
-            />
-          </label>
-        ) : null}
+        <label className="share-fallback">
+          <span>{showFallback || insecure ? "Link (select and copy if the button fails)" : "Link"}</span>
+          <input
+            type="text"
+            readOnly
+            value={fullUrl}
+            aria-label="View link"
+            onFocus={(event) => event.currentTarget.select()}
+            onClick={(event) => event.currentTarget.select()}
+          />
+        </label>
       </section>
 
       <section className="share-section" aria-labelledby="share-export-heading">
@@ -459,18 +458,31 @@ function findExportCanvas(): HTMLCanvasElement | null {
   return null
 }
 
-// Browsers hide the clipboard API on plain HTTP, which a tailnet address is.
+/** Copy text on HTTPS and on plain HTTP (Tailscale). Modern browsers expose
+ * `navigator.clipboard` on HTTP but reject `writeText` outside a secure
+ * context, so existence alone is not enough — fall back to execCommand. */
 async function writeClipboard(text: string) {
-  if (navigator.clipboard) return navigator.clipboard.writeText(text)
+  if (typeof window !== "undefined" && window.isSecureContext && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {
+      // Fall through: permissions or a flaky host clipboard.
+    }
+  }
   const box = document.createElement("textarea")
   box.value = text
   // Keep the fallback out of view without display:none, which some browsers
   // refuse to copy from.
   box.style.position = "fixed"
+  box.style.left = "0"
+  box.style.top = "0"
   box.style.opacity = "0"
+  box.setAttribute("readonly", "")
   document.body.append(box)
   box.focus()
   box.select()
+  box.setSelectionRange(0, text.length)
   let copied = false
   try {
     copied = document.execCommand("copy")

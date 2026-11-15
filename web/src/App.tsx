@@ -881,7 +881,27 @@ function SkyShell(props: {
 }) {
   const { view, visits } = props
   const mosaic = useMosaic(view, props.colour.colorBands, props.armed, props.run)
-  const raw = useRawLayers(mosaic, props.display, props.rawEnabled, view.color, scienceViewKey(view, props.colour), mosaic.restart)
+  // Display 404s (job gone) used to call mosaic.restart immediately. A cancel
+  // race then 404-looped forever. Cap and debounce so one lost job recovers
+  // once instead of spinning Find/Stop and the renderer.
+  const lostRestarts = useRef(0)
+  const lostTimer = useRef(0)
+  useEffect(() => {
+    lostRestarts.current = 0
+    window.clearTimeout(lostTimer.current)
+  }, [props.run, props.armed])
+  const onDisplayJobLost = useCallback(() => {
+    if (!props.armed) return
+    if (lostRestarts.current >= 2) return
+    window.clearTimeout(lostTimer.current)
+    lostTimer.current = window.setTimeout(() => {
+      if (!props.armed) return
+      if (lostRestarts.current >= 2) return
+      lostRestarts.current += 1
+      mosaic.restart()
+    }, 750)
+  }, [props.armed, mosaic.restart])
+  const raw = useRawLayers(mosaic, props.display, props.rawEnabled, view.color, scienceViewKey(view, props.colour), onDisplayJobLost)
   const rawStateKey = JSON.stringify(raw.state)
   const rawGateKey = JSON.stringify(raw.gate)
   const rawColorKey = JSON.stringify(raw.colorDisplay && {
