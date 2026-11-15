@@ -6,8 +6,11 @@ import type { SpectrumPointTarget } from "../spectrum-panel"
 import type { View } from "../../url-state/view"
 import { formatBands, type Bounds } from "./bounds"
 import {
+  brightCentroid,
   centreCoverage,
   paintDifference,
+  paintMotionGlow,
+  paintOnion,
   paintPlane,
   paintSum,
   resolveStretch,
@@ -20,12 +23,14 @@ import { formatMjdDate, mjdToMs, qualityFlags, stepReady, type ExposureRow } fro
 import { useCalibratedFrames, type CalibratedFrame } from "./useCalibratedFrames"
 import "./specific.css"
 
-type Show = "epoch" | "previous" | "first" | "sum"
+type Show = "epoch" | "onion" | "previous" | "first" | "glow" | "sum"
 
 const SHOW_LABELS: Record<Show, string> = {
-  epoch: "Each epoch",
+  epoch: "Blink each epoch",
+  onion: "Half-and-half overlay",
   previous: "Minus previous epoch",
   first: "Minus first epoch",
+  glow: "Motion glow (|A−B|)",
   sum: "All epochs added",
 }
 
@@ -61,6 +66,10 @@ export function EpochPlayer(props: {
   const [manualHigh, setManualHigh] = useState<string>("")
   // Blink interval in ms, same unit WiseView uses (speed=500 → 500 ms).
   const [intervalMs, setIntervalMs] = useState(500)
+  /** Diff / glow gain. 1 = mild, 3 = loud residuals. */
+  const [diffGain, setDiffGain] = useState(2)
+  /** Optional locked pair for compare modes; defaults to previous/first logic. */
+  const [lockB, setLockB] = useState<number | null>(null)
 
   const ready = epochs.frames.flatMap((frame, at) => (frame.state === "ready" && frame.plane ? [at] : []))
   const readyKey = ready.join(",")
@@ -135,6 +144,16 @@ export function EpochPlayer(props: {
     }
   }, [width, height, run, customRun])
 
+  const referenceAt = useMemo(() => {
+    if (shown === undefined || ready.length === 0) return undefined
+    if (lockB !== null && ready.includes(lockB) && lockB !== shown) return lockB
+    if (show === "first" || show === "glow" || show === "onion") return ready[0]
+    if (show === "previous") return stepReady(ready, shown, -1)
+    return undefined
+  }, [show, shown, readyKey, lockB])
+
+  const reference = referenceAt === undefined ? undefined : epochs.frames[referenceAt]
+
   useEffect(() => {
     const context = mosaic?.canvas.getContext("2d")
     if (!mosaic || !context || !current?.plane || !stretch) return
@@ -147,14 +166,32 @@ export function EpochPlayer(props: {
         return plane ? [plane] : []
       })
       paintSum(planes, stretch, out, display)
+    } else if (show === "onion" && reference?.plane) {
+      paintOnion(current.plane, reference.plane, stretch, out, display, 0.5)
+    } else if (show === "glow" && reference?.plane) {
+      paintMotionGlow(current.plane, reference.plane, stretch, out, display, 0.06, diffGain)
+    } else if (reference?.plane) {
+      paintDifference(current.plane, reference.plane, stretch, out, display, diffGain)
     } else {
-      const referenceAt = show === "first" ? ready[0]! : stepReady(ready, shown ?? 0, -1)
-      const reference = epochs.frames[referenceAt]?.plane
-      if (!reference) return
-      paintDifference(current.plane, reference, stretch, out, display)
+      paintPlane(current.plane, stretch, out, display)
     }
     context.putImageData(out, 0, 0)
-  }, [mosaic, current?.plane, show, readyKey, stretch, display])
+  }, [mosaic, current?.plane, reference?.plane, show, readyKey, stretch, display, diffGain])
+
+  const motionNote = useMemo(() => {
+    if (!current?.plane || !reference?.plane || shown === undefined || referenceAt === undefined) return undefined
+    if (show !== "glow" && show !== "previous" && show !== "first" && show !== "onion") return undefined
+    const a = brightCentroid(current.plane)
+    const b = brightCentroid(reference.plane)
+    if (!a || !b) return undefined
+    const dx = a.x - b.x
+    const dy = a.y - b.y
+    const pix = Math.hypot(dx, dy)
+    // SPHEREx plate scale is 6.15"/px — same constant the viewport uses.
+    const arcsec = pix * 6.15
+    if (pix < 0.15) return "Peak source steady (<0.15 px) between these frames"
+    return `Peak shift ${pix.toFixed(2)} px · ${arcsec.toFixed(1)}″ between compared frames`
+  }, [current?.plane, reference?.plane, shown, referenceAt, show])
 
   const pick = (pixel: { x: number; y: number }) => {
     if (!mosaic || !clicksWork(mosaic)) return
@@ -351,6 +388,32 @@ export function EpochPlayer(props: {
                 onChange={(event) => setManualHigh(event.target.value)}
               />
             </label>
+            <label className="epoch-option" title="How hard difference and motion glow push residuals">
+              Gain
+              <input
+                type="range"
+                min={0.5}
+                max={4}
+                step={0.1}
+                value={diffGain}
+                onChange={(event) => setDiffGain(Number(event.target.value))}
+              />
+              <span className="epoch-ms">{diffGain.toFixed(1)}×</span>
+            </label>
+            <label className="epoch-option" title="Second frame for overlay, difference and motion glow. Default is first or previous epoch.">
+              vs
+              <select
+                value={lockB === null ? "" : String(lockB)}
+                onChange={(event) => setLockB(event.target.value === "" ? null : Number(event.target.value))}
+              >
+                <option value="">auto</option>
+                {ready.map((at) => (
+                  <option key={epochs.frames[at]!.id} value={at} disabled={at === shown}>
+                    {epochs.frames[at]!.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         ) : null}
         <figcaption>
@@ -366,8 +429,21 @@ export function EpochPlayer(props: {
             <span className="epoch-now">{ready.length} frames added · shared stretch</span>
           ) : null}
           {current && (show === "previous" || show === "first") ? (
-            <span className="delta-legend">white: brighter in this epoch · black: brighter in the other · calibrated</span>
+            <span className="delta-legend">
+              white: brighter now · black: brighter in {reference?.label ?? "the other"} · calibrated ×{diffGain.toFixed(1)}
+            </span>
           ) : null}
+          {current && show === "onion" ? (
+            <span className="delta-legend">
+              50% this epoch + 50% {reference?.label ?? "reference"} — movers double; fixed sky sits still
+            </span>
+          ) : null}
+          {current && show === "glow" ? (
+            <span className="delta-legend">
+              lime where |this − {reference?.label ?? "reference"}| is large · fixed sky stays grey
+            </span>
+          ) : null}
+          {motionNote ? <span className="epoch-motion">{motionNote}</span> : null}
           <span>bands {formatBands(bounds.bands)}</span>
           {stretch ? (
             <span title="Shared display stretch across every frame">

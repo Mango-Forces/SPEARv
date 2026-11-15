@@ -217,3 +217,8 @@ fieldset.epoch-fieldset > legend {
   padding: 0 6px;
   font-variant-numeric: tabular-nums;
 }
+
+.epoch-motion {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
