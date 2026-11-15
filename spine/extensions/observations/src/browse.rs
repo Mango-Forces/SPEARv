@@ -131,9 +131,14 @@ pub fn page_rows(
 ) -> Result<(usize, Vec<SnippetRow>), String> {
     let sort = query.sort.as_deref().unwrap_or("time");
     let direction = query.direction.as_deref().unwrap_or("asc");
-    if !["time", "band"].contains(&sort) || !["asc", "desc"].contains(&direction) {
-        return Err("Sort must be time/band, direction asc/desc".into());
+    if !["time", "band", "psf"].contains(&sort) || !["asc", "desc"].contains(&direction) {
+        return Err("Sort must be time/band/psf, direction asc/desc".into());
     }
+    let passing_only = match query.quality.as_deref() {
+        None | Some("") | Some("any") => false,
+        Some("pass") => true,
+        Some(_) => return Err("Quality must be any or pass".into()),
+    };
     if query.limit == 0 {
         return Err("Page limit must be positive".into());
     }
@@ -157,8 +162,22 @@ pub fn page_rows(
                 text.contains(term)
             })
         })
+        .filter(|row| !passing_only || quality_flags(&row.quality) == 0)
         .collect();
     matching.sort_by(|a, b| {
+        if sort == "psf" {
+            // Missing PSF widths sort after every measured one in either direction.
+            let width = |row: &SnippetRow| row.quality.get("psf_fwhm").and_then(|value| value.as_f64());
+            let measured = |x: f64, y: f64| if direction == "desc" { y.total_cmp(&x) } else { x.total_cmp(&y) };
+            return match (width(a), width(b)) {
+                (Some(x), Some(y)) => measured(x, y),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+            .then(a.mjd.total_cmp(&b.mjd))
+            .then(a.id.cmp(&b.id));
+        }
         let primary = if sort == "band" {
             a.band.cmp(&b.band).then(a.mjd.total_cmp(&b.mjd))
         } else {
@@ -180,6 +199,27 @@ pub fn page_rows(
             .cloned()
             .collect(),
     ))
+}
+
+/// Header flags on one row, matching the web `qualityFlags`: a non-Pass DQA,
+/// aurora, airglow or shuttle glow, satellite streaks, or a nonzero FINAST.
+/// Unknown fields raise nothing.
+pub fn quality_flags(quality: &serde_json::Value) -> usize {
+    let text = |key: &str| quality.get(key).and_then(|value| value.as_str());
+    let flag = |key: &str| quality.get(key).and_then(|value| value.as_bool()) == Some(true);
+    let number = |key: &str| quality.get(key).and_then(|value| value.as_i64());
+    [
+        text("dqa_l1").is_some_and(|value| !value.eq_ignore_ascii_case("pass")),
+        text("dqa_l2").is_some_and(|value| !value.eq_ignore_ascii_case("pass")),
+        flag("aurora"),
+        flag("airglow"),
+        flag("shuttle_glow"),
+        number("n_streaks").is_some_and(|count| count > 0),
+        number("finast").is_some_and(|value| value != 0),
+    ]
+    .into_iter()
+    .filter(|raised| *raised)
+    .count()
 }
 
 #[cfg(test)]
@@ -442,10 +482,57 @@ mod tests {
             direction: Some("asc".into()),
             offset: 1,
             limit: 1,
+            quality: None,
         };
         let (count, page) = page_rows(&rows, &query).unwrap();
         assert_eq!(count, 2);
         assert_eq!(page[0].id, "c");
+    }
+
+    #[test]
+    fn quality_filter_and_psf_sort_follow_the_header_flags() {
+        let row = |id: &str, quality: serde_json::Value| SnippetRow {
+            id: id.into(),
+            snippet_ref: id.into(),
+            band: 1,
+            mjd: 1.0,
+            utc: "2025-01-01T00:00:00Z".into(),
+            release: "dr1".into(),
+            detector: 1,
+            obsid: id.into(),
+            version: "v1".into(),
+            geometric_samples: 1,
+            wl_min_um: 0.75,
+            wl_max_um: 0.75,
+            target_covered: true,
+            quality,
+        };
+        let rows = vec![
+            row("streaked", serde_json::json!({"dqa_l1": "Pass", "n_streaks": 2, "psf_fwhm": 5.0})),
+            row("clean", serde_json::json!({"dqa_l1": "Pass", "dqa_l2": "Pass", "n_streaks": 0, "finast": 0, "psf_fwhm": 9.0})),
+            row("unknown", serde_json::Value::Null),
+            row("failed", serde_json::json!({"dqa_l2": "Fail", "psf_fwhm": 7.0})),
+        ];
+        assert_eq!(quality_flags(&rows[0].quality), 1);
+        assert_eq!(quality_flags(&rows[3].quality), 1);
+        assert_eq!(quality_flags(&rows[2].quality), 0, "unknown fields raise nothing");
+        let query = |quality: Option<&str>, direction: &str| ObservationPageQuery {
+            search: String::new(),
+            sort: Some("psf".into()),
+            direction: Some(direction.into()),
+            offset: 0,
+            limit: 10,
+            quality: quality.map(Into::into),
+        };
+        let ids = |page: Vec<SnippetRow>| page.into_iter().map(|row| row.id).collect::<Vec<_>>();
+        let (count, page) = page_rows(&rows, &query(Some("pass"), "asc")).unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(ids(page), ["clean", "unknown"]);
+        let (_, page) = page_rows(&rows, &query(None, "asc")).unwrap();
+        assert_eq!(ids(page), ["streaked", "failed", "clean", "unknown"]);
+        let (_, page) = page_rows(&rows, &query(None, "desc")).unwrap();
+        assert_eq!(ids(page), ["clean", "failed", "streaked", "unknown"]);
+        assert!(page_rows(&rows, &query(Some("bogus"), "asc")).is_err());
     }
 
     #[test]

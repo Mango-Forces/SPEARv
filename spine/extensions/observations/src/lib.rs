@@ -139,6 +139,7 @@ fn observation_routes(jobs: Arc<Jobs>) -> OpenApiRouter<Arc<Context>> {
         .routes(routes!(sequence_status))
         .routes(routes!(sequence_tile))
         .routes(routes!(sequence_variance_tile))
+        .routes(routes!(sequence_value_tile))
         .routes(routes!(release_sequence))
         .layer(axum::Extension(jobs))
 }
@@ -894,6 +895,35 @@ async fn sequence_variance_tile(
             .await
             .map_err(upstream)?
             .map_err(tile_failure)?;
+    Ok(([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
+}
+
+#[utoipa::path(get,operation_id="sequences.values",path="/api/v1/sequences/{sequence_id}/sectors/{sector_id}/values/{x}/{y}",params(("sequence_id"=String,Path),("sector_id"=String,Path),("x"=u32,Path),("y"=u32,Path)),responses((status=200,content_type="application/octet-stream"),(status=404,body=ObservationApiError),(status=409,body=ObservationApiError)))]
+/// Raw little-endian `f32` calibrated values of one 256×256 tile, MJy/sr with
+/// NaN for no data. The browser applies its own shared stretch and comparisons.
+async fn sequence_value_tile(
+    axum::Extension(jobs): axum::Extension<Arc<Jobs>>,
+    Path((id, sector_id, x, y)): Path<(String, String, u32, u32)>,
+) -> Result<Response, ApiFailure> {
+    let owner = find_sequence(&jobs, &id)?;
+    let (frame, fingerprint) = {
+        let guard = owner.lock().map_err(upstream)?;
+        let frame = sequence::variance_source(&guard, &sector_id).map_err(tile_failure)?;
+        let fingerprint = guard
+            .info
+            .sectors
+            .iter()
+            .find(|sector| sector.id == sector_id)
+            .map(|sector| sector.fingerprint.clone());
+        (frame, fingerprint)
+    };
+    if let Some(fingerprint) = fingerprint {
+        jobs.touch_artifact(&fingerprint);
+    }
+    let bytes = tokio::task::spawn_blocking(move || sequence::encode_values(&frame, &sector_id, x, y))
+        .await
+        .map_err(upstream)?
+        .map_err(tile_failure)?;
     Ok(([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
 }
 

@@ -209,6 +209,9 @@ pub struct ObservationPageQuery {
     pub offset: usize,
     #[serde(default = "page_limit")]
     pub limit: usize,
+    /// `pass` keeps only rows whose header quality raises no flag.
+    #[serde(default)]
+    pub quality: Option<String>,
 }
 fn page_limit() -> usize {
     50

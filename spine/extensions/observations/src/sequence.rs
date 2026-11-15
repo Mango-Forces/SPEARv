@@ -1142,6 +1142,26 @@ pub fn encode_variance(
     Ok(bytes)
 }
 
+/// Raw little-endian `f32` calibrated value tile (256×256), NaN for no data.
+/// A tile with no data at all is all NaN rather than an error, so a frame
+/// assembles from every tile of the grid.
+pub fn encode_values(
+    frame: &Frame,
+    _sector_id: &str,
+    x: u32,
+    y: u32,
+) -> Result<Vec<u8>, (bool, String)> {
+    let tile = frame.read_tile(x, y).map_err(|error| (false, error))?;
+    let Some(tile) = tile else {
+        return Ok(std::iter::repeat(f32::NAN.to_le_bytes()).take(256 * 256).flatten().collect());
+    };
+    let mut bytes = Vec::with_capacity(tile.value.len() * 4);
+    for value in &tile.value {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 pub fn variance_tile(
     sequence: &Sequence,
