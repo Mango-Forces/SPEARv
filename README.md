@@ -1,15 +1,58 @@
-Hey! Please do not exclude the work from global judging due to this commit. 
+Hey! Please do not exclude the work from global judging due to this commit.
 
-I have not edited the project itself in any way, shape or form since the hackathon deadline, however, I passed out and could not write the credits in time. 
+I have not edited the project itself in any way, shape or form since the hackathon deadline; every commit after it is only this README and the screenshots. I passed out and could not write the credits in time.
 
-Unlike other projects presented at our local event (Tbilisi, Technopark) our project was actually fully functional, while most teams delivered only an advert for what they "will" do.
+We picked the name SPEARv since grasping a point in the sky is like hitting a target, like bow and arrow, but this felt bigger, so we went with a spear. V is there for Visual, or Visualization. It is styled SPEAR uppercase, v lowercase to match SPHEREx.
 
-We worked very hard on making SPEARv functional and comfortable over the two days of the challenge, we hope that it'll be beneficial to you (NASA), or to anybody else. 
+I worked hard on making SPEARv functional and comfortable over the two days of the challenge, and I hope that it'll be beneficial to you (NASA), or to anybody else.
 
-You can check it out at mango.forces.quest it'll load up SPEARv with some default setting. Althrough we intent to polish this project up as a portfolio piece, the served project at this URL will be the project finished during the competition. The main branch will have the competition work, while for future stuff we will make another branch. 
+You can check it out at https://mango.forces.quest. It'll load up SPEARv with some default settings. Although I intend to polish this project up as a portfolio piece, the served project at this URL will be the project finished during the competition. The main branch will have the competition work, while for future stuff I will make another branch (probably "next").
 
+I am committing to serving the app for a month, with full compute backing for comfortable tests. If you, the judges, will see this work: fields under about 1° are light, so test away. Larger fields are heavy, so please avoid running several big Finds (10°+) at the same time, and at the very large scales (25° FOV or so) please do not launch more than 1 Find at a time (across tabs or different judges).
 
-Well. These are the credits requested - 
+Here are some screenshots!
+
+![Color mosaic with band controls](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/color-wide-controls.png)
+
+![Barnard's Star Specific blink with track movers](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/blink-barnard-track-movers.png)
+
+*Track movers flags candidates, not confirmed discoveries. The north-moving chip is Barnard's Star (catalog proper motion ~10.4″/yr N).*
+
+![Gaia overlay and on-click spectrum](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/gaia-overlay-spectrum.png)
+
+Now... let's discuss the brief!
+
+Objective:
+
+Your challenge is to create a public-facing web tool to display images of the sky from the SPHEREx mission, making it easy for anyone to quickly see how they change over time. Users will enter the coordinates of a patch of sky (Right Ascension and declination). Your tool will display a series of images of that patch like a little video, making it easy to spot moving objects. - Done as Specific mode (Blink). Each visit becomes one calibrated frame, and they play in time order like a little video, with play/pause, loop and blink speed.
+
+Test your tool on Barnard's Star, Epsilon Indi B (a pair of brown dwarfs orbiting a star), WISE 0855 (a fast-moving brown dwarf Right Ascension 08h55m10.831s, declination -7d14m42.53s), and variable stars RW Aurigae and R Draconis. - Done, you can type RA, Dec and FOV for these to see for yourself, or just open these and press Find:
+
+- Barnard's Star: https://mango.forces.quest/?ra=269.45208&dec=4.69333&fov_l=0.2&fov_h=0.2&mode=specific&dr=qr2
+- Epsilon Indi B: https://mango.forces.quest/?ra=330.84042&dec=-56.78611&fov_l=0.2&fov_h=0.2&mode=specific&dr=dr1
+- WISE 0855 (bands 69-102, where the cold brown dwarf shows best): https://mango.forces.quest/?ra=133.786245&dec=-7.244372&fov_l=0.15&fov_h=0.15&mode=specific&dr=dr1&bands=69-102
+- RW Aurigae: https://mango.forces.quest/?ra=76.956&dec=30.401&fov_l=0.2&fov_h=0.2&mode=specific&dr=dr1
+- R Draconis: https://mango.forces.quest/?ra=248.167&dec=66.755&fov_l=0.2&fov_h=0.2&mode=specific&dr=dr1
+
+Potential Considerations
+
+New SPHEREx data is arriving fast! Make sure to design a tool that's easy to update with the latest data releases. - Worked hard on this one! We have a little system, sort of a.. "library and librarian" let's call it LAL. What LAL does is it lists the NASA S3 bucket, reads only the FITS headers (coordinates, WCS, release, detector, time, quality) and organizes them into a table that points at the real S3 objects. Every 6 hours it re-lists the bucket; if a file is modified, it updates it, if a new one is added, it adds it. So, within 6h of the data spawning on their S3 mirror, our app should pick it up! DR1, QR2 and QR3 are all in there right now.
+
+Think creatively about how to display those 102 infrared bands so users can take advantage of them to make new discoveries! For example, it may make sense to separately add together all the data taken by each of the six detector arrays to improve the signal-to-noise in the images you display. Extra kudos if your tool can generate spectra on the fly. - This one is why we added multiple action modes: color, composite and specific. Color makes it.. colored. Of course (three band windows as RGB). Composite stacks the bands into one deep greyscale image. Specific stacks each visit into one frame, either all bands or one detector array (D1 to D6, short to long wavelength), and blinks them. Specific also allows you to combine frames comfortably and later use the combined result as "sectors" (noise-weighted average: inverse-variance mean within each band, then an equal-weight mean across the selected bands, to improve SNR), then play them back as video chronologically. Spectra: click any pixel and you get its spectrum across all 102 bands, on the fly.
+
+It may help users discover moving objects if they have the options to add together or subtract images taken at different times. - Implemented: minus previous, minus first, all frames added, half-and-half overlay, swipe compare, motion glow (|A−B|), and track movers, which fits position against time across epochs and draws the motion arrows. Track movers needs 4+ epochs; with fewer, you blink and subtract by eye.
+
+Let users choose the field of view! Larger fields of view can make it possible to track faster-moving sources, at the cost of longer data transfer times. - Done, FOV is yours to pick (up to 30°). We tested up to FOV of 25, but that is very taxing, in our test it pulled around 288 GB of data, so multi frame is going to be hard. I think multi frame of say.. 10 FOV should be fine tho!
+
+Users could benefit from having the option to overlay astronomical data from other telescopes, such as the Gaia mission or the WISE mission. - Done! But not as directly placing images on top. What we pull from those missions are catalogs (Gaia DR3, AllWISE), not pictures, so we overlay that data as points (Gaia circles, WISE diamonds). This gives correlation or matching (an object found by Gaia/WISE can be cross examined on SPHEREx).
+
+If you make it possible to query your tool by including coordinates in the URL, users will be able to easily embed it in other websites and projects. - The URL holds your request: field, mode, release, bands, color recipe and display settings, so a link reopens the same view (press Find to render it). Zoom/pan and the Blink/Lab tab are not in the URL. Embedding uses a dedicated /embed page, a minimal image page with CSP frame-ancestors * so any site can iframe it.
+
+It can be useful to display metadata, like contamination flags. - Lab exposure table shows header quality (DQA, streaks, airglow/aurora, FINAST, PSF) and a pass-only filter. QR2 headers lack some of these cards, so those show as Unknown there.
+
+Consider looking for publicly available tools that may help in handling astronomical data, like the Astrophy tools, and in displaying astronomical data, like the Aladin tool developed by the Strasbourg Astronomical Data Center (CDS). - Funny part. Originally when I was building this, I self-rolled the FITS reader and some other heavy stuff, then switched to well maintained libraries instead. Astropy (pinned 8.0.2) does our WCS/SIP sky-to-pixel math, and CFITSIO reads the FITS files. We did not use Aladin; the viewer is our own.
+
+Well. Here's credits -
 
 ### Data
 
@@ -21,7 +64,6 @@ Well. These are the credits requested -
 | WISE / AllWISE mission page | NASA IRSA | https://irsa.ipac.caltech.edu/Missions/wise.html |
 | Gaia DR3 source catalog | ESA Gaia | https://cdn.gea.esac.esa.int/Gaia/gdr3/gaia_source/ |
 | Gaia Archive | ESA | https://gea.esac.esa.int/archive/ |
-
 
 ### Engine (Rust)
 
@@ -54,6 +96,15 @@ Well. These are the credits requested -
 | [tempfile](https://github.com/Stebalien/tempfile) | Temporary files for render paths | https://github.com/Stebalien/tempfile |
 | [tokio-util](https://github.com/tokio-rs/tokio) | Async IO helpers | https://github.com/tokio-rs/tokio |
 
+### Science runtime (Python)
+
+| Library | Role | URL |
+| --- | --- | --- |
+| [Python](https://www.python.org/) | Embedded science runtime (via PyO3) | https://www.python.org/ |
+| [NumPy](https://numpy.org/) | Array math for stacking and differences | https://numpy.org/ |
+| [Astropy](https://www.astropy.org/) 8.0.2 | WCS/SIP sky-to-pixel transforms | https://www.astropy.org/ |
+| [astropy-iers-data](https://github.com/astropy/astropy-iers-data) | Pinned Earth-rotation data for Astropy | https://github.com/astropy/astropy-iers-data |
+
 ### Web UI
 
 | Library | Role | URL |
@@ -83,4 +134,3 @@ Well. These are the credits requested -
 | Backyard Worlds (citizen motion search reference) | https://www.backyardworlds.org/ |
 
 ---
-
