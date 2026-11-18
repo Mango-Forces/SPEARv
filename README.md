@@ -20,6 +20,10 @@ Here are some screenshots!
 
 ![Gaia overlay and on-click spectrum](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/gaia-overlay-spectrum.png)
 
+![4 Vesta moving through a SPHEREx field](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/vesta-blink.gif)
+
+*Asteroid 4 Vesta crossing a 1.3° field over 21 to 30 June 2025: ten single SPHEREx exposures (detector D6, 4.4 to 5.0 µm) rendered by the SPEARv engine. The green ring is where NASA JPL Horizons predicts Vesta at each exposure time, and it lands on the bright dot in every frame, while the stars stay put.*
+
 Now... let's discuss the brief!
 
 Objective:
