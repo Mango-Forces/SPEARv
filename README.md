@@ -16,7 +16,7 @@ Here are some screenshots!
 
 ![Barnard's Star Specific blink with track movers](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/blink-barnard-track-movers.png)
 
-*Track movers flags candidates, not confirmed discoveries. The north-moving chip is Barnard's Star (catalog proper motion ~10.4″/yr N).*
+*Track movers flags candidates, not confirmed discoveries. Barnard's Star is the bright star at the top, caught as "Possible 10.9 ± 2.9″/yr N" (catalog proper motion ~10.4″/yr N). The other chips are candidates, not known movers.*
 
 ![Gaia overlay and on-click spectrum](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/gaia-overlay-spectrum.png)
 
