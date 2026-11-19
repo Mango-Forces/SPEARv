@@ -33,7 +33,7 @@ Your challenge is to create a public-facing web tool to display images of the sk
 Test your tool on Barnard's Star, Epsilon Indi B (a pair of brown dwarfs orbiting a star), WISE 0855 (a fast-moving brown dwarf Right Ascension 08h55m10.831s, declination -7d14m42.53s), and variable stars RW Aurigae and R Draconis. - Done, you can type RA, Dec and FOV for these to see for yourself, or just open these and press Find:
 
 - Barnard's Star: https://mango.forces.quest/?ra=269.45208&dec=4.69333&fov_l=0.2&fov_h=0.2&mode=specific&dr=qr2
-- Epsilon Indi B: https://mango.forces.quest/?ra=330.84042&dec=-56.78611&fov_l=0.2&fov_h=0.2&mode=specific&dr=dr1
+- Epsilon Indi B: https://mango.forces.quest/?ra=331.0963&dec=-56.8005&fov_l=0.15&fov_h=0.15&mode=specific&dr=dr1
 - WISE 0855 (bands 69-102, where the cold brown dwarf shows best): https://mango.forces.quest/?ra=133.786245&dec=-7.244372&fov_l=0.15&fov_h=0.15&mode=specific&dr=dr1&bands=69-102
 - RW Aurigae: https://mango.forces.quest/?ra=76.956&dec=30.401&fov_l=0.2&fov_h=0.2&mode=specific&dr=dr1
 - R Draconis: https://mango.forces.quest/?ra=248.167&dec=66.755&fov_l=0.2&fov_h=0.2&mode=specific&dr=dr1
