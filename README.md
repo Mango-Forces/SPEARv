@@ -12,11 +12,17 @@ I am committing to serving the app for a month, with full compute backing for co
 
 Here are some screenshots!
 
-![Color mosaic with band controls](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/color-wide-controls.png)
+![Orion complex in false color, 5 degree field](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/orion-color-5deg.png)
 
-![Barnard's Star Specific blink with track movers](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/blink-barnard-track-movers.png)
+*Orion complex in false color, 5 degree field, 1471 exposures. The M42 core glows red at lower right. R, G and B are bands 91, 41 and 6.*
 
-*Track movers flags candidates, not confirmed discoveries. Barnard's Star is the bright star at the top, caught as "Possible 10.9 ± 2.9″/yr N" (catalog proper motion ~10.4″/yr N). The other chips are candidates, not known movers.*
+![Barnard's Star blink with track mover](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/barnard-blink-clean.png)
+
+*Track movers flags candidates, not confirmed discoveries. Barnard's Star caught as "Possible 9.4 ± 3.1″/yr N" (catalog proper motion ~10.4″/yr N).*
+
+![WISE 0855 blink with track mover](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/wise0855-blink.png)
+
+*WISE 0855, a cold brown dwarf, across 5 visits. Track movers fits 7.6 ± 0.9″/yr W at 8.4σ (catalog ~8.1″/yr W). Bands 69 to 102, where cold brown dwarfs are brightest.*
 
 ![Gaia overlay and on-click spectrum](https://raw.githubusercontent.com/Mango-Forces/SPEARv/main/screenshots/gaia-overlay-spectrum.png)
 
@@ -32,7 +38,7 @@ Your challenge is to create a public-facing web tool to display images of the sk
 
 Test your tool on Barnard's Star, Epsilon Indi B (a pair of brown dwarfs orbiting a star), WISE 0855 (a fast-moving brown dwarf Right Ascension 08h55m10.831s, declination -7d14m42.53s), and variable stars RW Aurigae and R Draconis. - Done, you can type RA, Dec and FOV for these to see for yourself, or just open these and press Find:
 
-- Barnard's Star: https://mango.forces.quest/?ra=269.45208&dec=4.69333&fov_l=0.2&fov_h=0.2&mode=specific&dr=qr2
+- Barnard's Star: https://mango.forces.quest/?ra=269.44637&dec=4.767&fov_l=0.2&fov_h=0.2&mode=specific&dr=dr1
 - Epsilon Indi B: https://mango.forces.quest/?ra=331.0963&dec=-56.8005&fov_l=0.15&fov_h=0.15&mode=specific&dr=dr1
 - WISE 0855 (bands 69-102, where the cold brown dwarf shows best): https://mango.forces.quest/?ra=133.786245&dec=-7.244372&fov_l=0.15&fov_h=0.15&mode=specific&dr=dr1&bands=69-102
 - RW Aurigae: https://mango.forces.quest/?ra=76.956&dec=30.401&fov_l=0.2&fov_h=0.2&mode=specific&dr=dr1
